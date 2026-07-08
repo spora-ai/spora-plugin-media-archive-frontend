@@ -74,5 +74,15 @@ export default defineConfig({
     test: {
         environment: 'happy-dom',
         globals: true,
+        // Emit `coverage/lcov.info` so SonarCloud can read it. The v8
+        // provider only writes coverage-final.json + clover.xml by default;
+        // we explicitly add `lcov` here to satisfy the SonarSource action's
+        // `sonar.javascript.lcov.reportPaths=coverage/lcov.info` setting.
+        coverage: {
+            provider: 'v8',
+            reporter: ['text', 'lcov', 'clover', 'json'],
+            reportsDirectory: './coverage',
+            include: ['src/**/*.{ts,vue}'],
+        },
     },
 })
