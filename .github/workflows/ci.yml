@@ -68,18 +68,27 @@ jobs:
         run: npm run build
 
       - name: Verify build artifacts
-        # The runtime contract depends on these two files existing at
-        # `frontend/main.js` and `frontend/style.css`. Fail loudly if the
-        # bundle didn't emit them.
+        # The runtime contract depends on `frontend/main.js` existing — that's
+        # the file `SporaPluginFrontendInstaller` copies to
+        # `public/plugins/<slug>/main.js`. `frontend/style.css` is OPTIONAL:
+        # Vite only emits it when a component ships a `<style>` block. This
+        # plugin relies on the host SPA's Tailwind classes for styling, so
+        # none of our components have `<style>` blocks and the file is
+        # legitimately absent. The installer copies whatever's in `frontend/`,
+        # so the host page picks up the missing CSS as a no-op rather than an
+        # error.
         run: |
           set -euo pipefail
-          for f in frontend/main.js frontend/style.css; do
-            if [ ! -s "$f" ]; then
-              echo "::error::$f missing or empty — the SporaPluginFrontendInstaller would skip this package."
-              exit 1
-            fi
-          done
+          if [ ! -s frontend/main.js ]; then
+            echo "::error::frontend/main.js missing or empty — the SporaPluginFrontendInstaller would skip this package."
+            exit 1
+          fi
           echo "frontend/main.js size: $(wc -c < frontend/main.js) bytes"
+          if [ -s frontend/style.css ]; then
+            echo "frontend/style.css size: $(wc -c < frontend/style.css) bytes"
+          else
+            echo "frontend/style.css not present (no <style> blocks in components — expected)"
+          fi
 
       - name: Smoke test
         # Asserts the IIFE bundle registers `window.SporaAppMediaArchive`
@@ -96,6 +105,8 @@ jobs:
             frontend/style.css
           if-no-files-found: ignore
           retention-days: 14
+        # `if-no-files-found: ignore` because style.css is optional — see
+        # the "Verify build artifacts" step for the rationale.
 
   sonarqube:
     name: SonarQube scan
