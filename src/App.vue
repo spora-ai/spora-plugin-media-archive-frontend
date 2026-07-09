@@ -7,6 +7,14 @@ import MediaGrid from './components/MediaGrid.vue'
 import MediaFilters from './components/MediaFilters.vue'
 import MediaDetailDrawer from './components/MediaDetailDrawer.vue'
 
+// Pulls in the plugin's Tailwind base/components/utilities. The `@vitejs/plugin-vue`
+// PostCSS pipeline processes this through tailwindcss + autoprefixer, then Vite
+// extracts the result into the sibling `frontend/style.css` asset (see
+// `vite.config.ts → build.rollupOptions.output.assetFileNames`). The host SPA's
+// `PluginAppPage.vue` auto-injects a `<link rel="stylesheet">` for that file
+// when this bundle mounts.
+import './style.css'
+
 const props = defineProps<{ hostContext: PluginHostContext }>()
 
 const api = computed(() => props.hostContext.api)

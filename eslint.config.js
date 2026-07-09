@@ -44,6 +44,6 @@ export default [
         },
     },
     {
-        ignores: ['node_modules/', 'dist/', '.vite/', 'coverage/', 'main.js', 'style.css'],
+        ignores: ['node_modules/', 'dist/', 'frontend/', '.vite/', 'coverage/'],
     },
 ]
