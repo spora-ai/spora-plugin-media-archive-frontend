@@ -1,0 +1,16 @@
+/*
+ * Plugin-side Tailwind entry. Imports are processed by PostCSS during the
+ * Vite build; only the resulting utility classes that survive Tailwind's
+ * purge end up in the emitted style.css.
+ *
+ * The CSS variables used by Tailwind colour utilities (--primary,
+ * --foreground, --border, ...) come from the host SPA's :root. The
+ * plugin does NOT redefine them — see tailwind.config.ts for the rationale.
+ *
+ * `@tailwind base` does include a small CSS reset (margin/padding zero,
+ * border-box, etc.) — safe to apply because the slot is scoped inside the
+ * host's <RouterView>, so the reset can't leak to host elements.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
