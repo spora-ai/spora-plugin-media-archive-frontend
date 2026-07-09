@@ -83,6 +83,15 @@ export default defineConfig({
             reporter: ['text', 'lcov', 'clover', 'json'],
             reportsDirectory: './coverage',
             include: ['src/**/*.{ts,vue}'],
+            // dev-main.ts is the side-effecting Vue bootstrap that mounts
+            // the app into the dev sandbox's #app node. It imports the
+            // document/window globals and is only loaded by index.html
+            // in `npm run dev` mode — production ships main.ts instead.
+            // Excluding it from coverage measurement keeps SonarCloud's
+            // "new code must have ≥80% coverage" gate honest: dev tooling
+            // isn't production code. The pure helpers it composes live
+            // in dev-mock.ts which IS fully tested.
+            exclude: ['src/dev-main.ts'],
         },
     },
 })
