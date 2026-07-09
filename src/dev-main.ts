@@ -5,7 +5,16 @@
  *
  * The mock API mirrors the real `/api/v1/media` envelope shape so the
  * components behave identically in dev and prod — only the data source
- * differs.
+ * differs. The mock honors the same query params the PHP controller
+ * supports (`type`, `plugin`, `search`, `page`, `per_page`) so the
+ * filter UI can be exercised end-to-end without a database.
+ *
+ * For end-to-end testing against a real backend, use the host dev flow:
+ *   1. PHP at :8080 (`composer dev` in spora-local)
+ *   2. Plugin dev at :5174 (`npm run dev` here)
+ *   3. Host SPA at :5173 (`npm run dev` in spora-frontend)
+ * The host's `vite.config.ts → server.proxy` then forwards
+ * `/api` to PHP and `/plugins/media-archive/*` to this dev server.
  */
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -52,7 +61,101 @@ const FIXTURE: MediaAsset[] = [
         tool_call_id: 'tc2',
         created_at: new Date(Date.now() - 3600_000).toISOString(),
     },
+    {
+        id: 'demo-3',
+        media_type: 'image',
+        mime_type: 'image/jpeg',
+        byte_size: 234_567,
+        width: 1920,
+        height: 1080,
+        duration_seconds: null,
+        prompt: 'A product photo on a marble counter',
+        asset_url: 'https://placehold.co/600x400/jpeg',
+        source_url: null,
+        storage_mode: 'external',
+        plugin_slug: 'minimax',
+        tool_name: 'image',
+        agent_id: 'a2',
+        task_id: 't3',
+        tool_call_id: 'tc3',
+        created_at: new Date(Date.now() - 7_200_000).toISOString(),
+    },
+    {
+        id: 'demo-4',
+        media_type: 'video',
+        mime_type: 'video/mp4',
+        byte_size: 4_567_890,
+        width: 1920,
+        height: 1080,
+        duration_seconds: 45.2,
+        prompt: 'A drone shot of a coastal city at dusk',
+        asset_url: 'https://placehold.co/600x400/mp4',
+        source_url: null,
+        storage_mode: 'external',
+        plugin_slug: 'minimax',
+        tool_name: 'video',
+        agent_id: 'a2',
+        task_id: 't4',
+        tool_call_id: 'tc4',
+        created_at: new Date(Date.now() - 86_400_000).toISOString(),
+    },
+    {
+        id: 'demo-5',
+        media_type: 'document',
+        mime_type: 'application/pdf',
+        byte_size: 89_012,
+        width: null,
+        height: null,
+        duration_seconds: null,
+        prompt: 'Quarterly earnings summary',
+        asset_url: 'https://placehold.co/600x400/pdf',
+        source_url: null,
+        storage_mode: 'local',
+        plugin_slug: 'tavily',
+        tool_name: 'research',
+        agent_id: 'a3',
+        task_id: 't5',
+        tool_call_id: 'tc5',
+        created_at: new Date(Date.now() - 172_800_000).toISOString(),
+    },
 ]
+
+interface ListQuery {
+    type: string
+    plugin: string
+    search: string
+    page: number
+    perPage: number
+}
+
+function parseListQuery(path: string): ListQuery {
+    const queryString = path.includes('?') ? path.slice(path.indexOf('?') + 1) : ''
+    const params = new URLSearchParams(queryString)
+    return {
+        type: params.get('type') ?? '',
+        plugin: params.get('plugin') ?? '',
+        search: (params.get('search') ?? '').trim().toLowerCase(),
+        page: Math.max(1, Number(params.get('page') ?? '1') || 1),
+        perPage: Math.max(1, Number(params.get('per_page') ?? '24') || 24),
+    }
+}
+
+function filterFixture(query: ListQuery): MediaAsset[] {
+    return FIXTURE.filter((asset) => {
+        if (query.type && asset.media_type !== query.type) return false
+        if (query.plugin && asset.plugin_slug !== query.plugin) return false
+        if (query.search) {
+            const haystack = (asset.prompt ?? '').toLowerCase()
+            if (!haystack.includes(query.search)) return false
+        }
+        return true
+    })
+}
+
+// Tell the developer they're in sandbox mode so they don't waste time
+// wondering why their real backend isn't responding. One line, no spammy
+// stack traces — this is intentional dev affordance, not production noise.
+console.info('[spora/media-archive] dev sandbox — using in-memory fixtures (no backend)')
 
 const mockApi: PluginHostContext['api'] = {
     async get<T>(path: string): Promise<{ data: T }> {
@@ -63,10 +166,20 @@ const mockApi: PluginHostContext['api'] = {
             return { data: { data: found } as T }
         }
         if (path.startsWith('/media')) {
+            const query = parseListQuery(path)
+            const filtered = filterFixture(query)
+            const start = (query.page - 1) * query.perPage
+            const page = filtered.slice(start, start + query.perPage)
+            const lastPage = Math.max(1, Math.ceil(filtered.length / query.perPage))
             return {
                 data: {
-                    data: FIXTURE,
-                    meta: { current_page: 1, per_page: 20, total: FIXTURE.length, last_page: 1 },
+                    data: page,
+                    meta: {
+                        current_page: query.page,
+                        per_page: query.perPage,
+                        total: filtered.length,
+                        last_page: lastPage,
+                    },
                 } as T,
             }
         }
