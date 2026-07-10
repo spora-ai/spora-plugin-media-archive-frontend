@@ -201,3 +201,112 @@ jobs:
             -Dsonar.organization=spora-ai
             -Dsonar.projectKey=spora-ai_spora-plugin-media-archive-frontend
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+  # Tags only. Builds the bundle, packages ONLY `frontend/` (the
+  # SporaPluginFrontendInstaller source dir) under a versioned root,
+  # and creates the GitHub Release with the tarball attached.
+  # `composer install` on operator hosts reads `dist.url` from the
+  # tagged composer.json — see RELEASING.md for the full flow.
+  build-and-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        # vue-tsc + vite build, output goes to frontend/ (per vite.config.ts).
+        run: npm run build
+
+      - name: Verify dist.url matches the release tag
+        run: |
+          TAG_V="${GITHUB_REF_NAME}"
+          EXPECTED="https://github.com/${{ github.repository }}/releases/download/${TAG_V}/spora-plugin-media-archive-frontend-${TAG_V}.tar.gz"
+          ACTUAL=$(jq -r .dist.url composer.json)
+          echo "Tag:        ${TAG_V}"
+          echo "Expected:   ${EXPECTED}"
+          echo "Actual:     ${ACTUAL}"
+          if [ "${ACTUAL}" != "${EXPECTED}" ]; then
+            echo "::error::composer.json dist.url does not match the release tag. Update composer.json BEFORE tagging."
+            echo "::error::Expected: ${EXPECTED}"
+            echo "::error::Actual:   ${ACTUAL}"
+            exit 1
+          fi
+
+      - name: Verify only frontend/ is shipped
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # The release artifact must contain ONLY the contents of frontend/
+          # (main.js + style.css, the Vite IIFE bundle) under a single
+          # spora-plugin-media-archive-frontend-v<VERSION>/ root directory.
+          # Nothing else — no source code, no node_modules, no build
+          # configs. The versioned root is what Composer's TarDownloader
+          # (PHP's PharData) requires to extract the archive cleanly.
+          set -e
+          STAGING=$(mktemp -d)
+          mkdir -p "$STAGING/spora-plugin-media-archive-frontend-${TAG}"
+          cp -R frontend/. "$STAGING/spora-plugin-media-archive-frontend-${TAG}/"
+          tar -czf /tmp/release-check.tar.gz -C "$STAGING" "spora-plugin-media-archive-frontend-${TAG}"
+          PREFIX="spora-plugin-media-archive-frontend-${TAG}/"
+          tar -tzf /tmp/release-check.tar.gz | head -20
+          echo
+          echo "Release artifact contains $(tar -tzf /tmp/release-check.tar.gz | wc -l | tr -d ' ') entries."
+
+          # Deny list: fail loudly if any of these ever sneak into the
+          # release tarball. Add to this list if a new non-runtime path
+          # starts shipping by accident. Strip the versioned root before
+          # matching so the regex sees only real frontend/ entries.
+          DENY_PATTERNS='(^|/)(\.git|\.github|node_modules|src|tests|coverage|scripts|package\.json|package-lock\.json|composer\.json|composer\.lock|vite\.config\.ts|tsconfig\.json|tailwind\.config\.ts|postcss\.config\.js|eslint\.config\.js|sonar-project\.properties|index\.html|README\.md|RELEASING\.md)$'
+          LEAKED=$(tar -tzf /tmp/release-check.tar.gz | grep -E "^${PREFIX}" | sed "s|^${PREFIX}||" | grep -E "$DENY_PATTERNS" || true)
+          if [ -n "$LEAKED" ]; then
+            echo "::error::Release artifact contains non-runtime paths:"
+            echo "$LEAKED"
+            exit 1
+          fi
+
+          # Allow list: confirm the expected frontend/ entries are
+          # present, each under the versioned root. `style.css` is
+          # OPTIONAL (Vite only emits it when a component ships a
+          # <style> block; this plugin relies on the host SPA's
+          # Tailwind classes, so no <style> blocks and no style.css).
+          for REQUIRED in main.js; do
+            if ! tar -tzf /tmp/release-check.tar.gz | grep -qx "^${PREFIX}${REQUIRED}"; then
+              echo "::error::Release artifact is missing required entry: ${PREFIX}${REQUIRED}"
+              exit 1
+            fi
+          done
+
+          echo "OK: release artifact shape is correct (only frontend/ contents, under spora-plugin-media-archive-frontend-${TAG}/)."
+
+      - name: Package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Ship ONLY the Vite frontend/ output, packaged under a single
+          # versioned root directory so Composer's TarDownloader (PHP's
+          # PharData) can extract the archive cleanly. The archive's
+          # top entry must be "spora-plugin-media-archive-frontend-${TAG}/",
+          # not "./" — the latter is what made spora-frontend v0.1.3 fail
+          # with "Cannot extract '.', internal error".
+          rm -rf staging
+          mkdir -p "staging/spora-plugin-media-archive-frontend-${TAG}"
+          cp -R frontend/. "staging/spora-plugin-media-archive-frontend-${TAG}/"
+          tar -czf "spora-plugin-media-archive-frontend-${TAG}.tar.gz" -C staging "spora-plugin-media-archive-frontend-${TAG}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: spora-plugin-media-archive-frontend-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true
