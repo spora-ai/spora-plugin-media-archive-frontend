@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import App from '../src/App.vue'
-import type { MediaAsset, MediaListResponse, PluginHostContext } from '../src/types'
+import type { MediaAsset, MediaListResponse } from '../src/types'
+import type { PluginHostContext } from '../src/shims'
+
+type GetFn = <T = unknown>(path: string) => Promise<T>
+type MockedApi = {
+    get: GetFn | ReturnType<typeof vi.fn>
+    post: ReturnType<typeof vi.fn>
+    patch: ReturnType<typeof vi.fn>
+    delete: ReturnType<typeof vi.fn>
+}
 
 const sample: MediaAsset = {
     id: 'test-1',
@@ -32,8 +41,12 @@ const emptyList: MediaListResponse = {
 }
 
 function buildContext(get: ReturnType<typeof vi.fn>): PluginHostContext {
+    const api: MockedApi = { get, post: vi.fn(), patch: vi.fn(), delete: vi.fn() }
     return {
-        api: { get, post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+        // The shim expects a typed callable. Cast through `unknown` to keep
+        // the test ergonomics (no need to re-declare the generic at every
+        // call site) while satisfying vue-tsc's stricter overload check.
+        api: api as unknown as PluginHostContext['api'],
         pinia: null,
         theme: 'light',
         route: null,
@@ -103,7 +116,10 @@ describe('App.vue', () => {
         const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
         await flushPromises()
         expect(wrapper.text()).toContain('Loading media')
-        resolveFn?.(emptyList)
+        // `resolveFn` is captured inside the Promise executor; the strict
+        // optional-chain types don't see it as a function here. Cast through
+        // `unknown` to invoke the resolved reference safely.
+        ;(resolveFn as unknown as ((v: MediaListResponse) => void) | null)?.(emptyList)
         await flushPromises()
         await flushPromises()
     })
