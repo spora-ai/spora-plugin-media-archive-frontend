@@ -152,29 +152,31 @@ export function paginate<T>(items: T[], page: number, perPage: number): T[] {
 
 export function createMockApi(): PluginHostContext['api'] {
     return {
-        async get<T>(path: string): Promise<{ data: T }> {
+        async get<T>(path: string): Promise<T> {
             if (path.startsWith('/media/') && path !== '/media') {
                 const id = path.slice('/media/'.length).split('?')[0]
                 const found = FIXTURE.find((m) => m.id === id)
                 if (!found) throw new Error(`Not found: ${id}`)
-                return { data: { data: found } as T }
+                return found as unknown as T
             }
             if (path.startsWith('/media')) {
                 const query = parseListQuery(path)
                 const filtered = filterFixture(query)
                 const page = paginate(filtered, query.page, query.perPage)
                 const lastPage = Math.max(1, Math.ceil(filtered.length / query.perPage))
+                // The host's API client unwraps `body.data` before handing
+                // the value to the caller (see
+                // `spora-frontend/src/api/client.ts → request<T>()`), so this
+                // mock returns the inner shape directly — matching what
+                // `api.get<T>()` will hand to the plugin when mounted under
+                // the host. Mirrors the unwrapped wire shape — see types.ts.
                 return {
-                    data: {
-                        data: page,
-                        meta: {
-                            current_page: query.page,
-                            per_page: query.perPage,
-                            total: filtered.length,
-                            last_page: lastPage,
-                        },
-                    } as T,
-                }
+                    assets: page,
+                    page: query.page,
+                    perPage: query.perPage,
+                    total: filtered.length,
+                    lastPage: lastPage,
+                } as unknown as T
             }
             throw new Error(`Mock API has no handler for ${path}`)
         },

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { Image, FileAudio, FileVideo, FileText, Search } from 'lucide-vue-next'
 import type { PluginHostContext } from './shims'
-import type { MediaAsset, MediaListQuery, MediaType } from './types'
+import type { MediaAsset, MediaListQuery, MediaListResponse, MediaType } from './types'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaFilters from './components/MediaFilters.vue'
 import MediaDetailDrawer from './components/MediaDetailDrawer.vue'
@@ -35,11 +35,14 @@ async function load(): Promise<void> {
         if (query.value.mediaType) params.set('type', query.value.mediaType)
         if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
         if (query.value.search) params.set('search', query.value.search)
-        const response = await api.value.get<{ data: MediaAsset[]; meta: { total: number } }>(
+        // The host's API client unwraps the standard `{ data: T }` envelope, so
+        // `response` is the inner `T` directly. MediaArchiveController emits
+        // `{ assets, page, perPage, total, lastPage }` for the list endpoint.
+        const response = await api.value.get<MediaListResponse>(
             `/media?${params.toString()}`,
         )
-        assets.value = response.data.data
-        total.value = response.data.meta.total
+        assets.value = response.assets
+        total.value = response.total
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e)
     } finally {
