@@ -28,6 +28,26 @@ import vue from '@vitejs/plugin-vue'
  */
 export default defineConfig({
     plugins: [vue()],
+    // `base` is the public URL prefix Vite uses for absolute paths in the
+    // dev-server-served HTML and for the HMR client. In standalone dev
+    // (`npm run dev`) it controls where the sandbox is served; in the
+    // host-proxied dev flow it MUST match the host's proxy prefix
+    // (`SPORA_PLUGIN_DEV_PORTS=media-archive:5174` on the host → the
+    // host's Vite forwards `/plugins/<slug>/*` to this server).
+    //
+    // Without this, the transformed module imports reference absolute
+    // paths like `/src/App.vue` and `/node_modules/.vite/deps/vue.js`,
+    // which the browser resolves against the document's origin (the
+    // host's :5173, not this server's :5174). The host doesn't have
+    // `/src/App.vue` and the sub-requests 404 silently — `window.SporaAppMediaArchive`
+    // is never assigned because the module's top-level code never finishes
+    // executing.
+    //
+    // The slug here mirrors the PHP app's `MediaArchiveApp::name()` —
+    // they're a coupled pair, not derivable from package metadata. The
+    // build output is unaffected: the IIFE lib emits a single self-
+    // contained `main.js` that doesn't reference its own base.
+    base: '/plugins/media-archive/',
     build: {
         // Write the IIFE bundle into `frontend/`. `SporaPluginFrontendInstaller`
         // (in spora-installer) copies the package's `frontend/` directory
