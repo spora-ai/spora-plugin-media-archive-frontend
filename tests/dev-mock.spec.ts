@@ -92,7 +92,7 @@ describe('createMockApi', () => {
 
     it('returns a single asset by id', async () => {
         const result = await api.get<MediaAsset>('/media/demo-1')
-        expect(result.data.id).toBe('demo-1')
+        expect(result.id).toBe('demo-1')
     })
 
     it('throws when the id is unknown', async () => {
@@ -101,24 +101,24 @@ describe('createMockApi', () => {
 
     it('returns the full list envelope when /media is called without filters', async () => {
         const result = await api.get<MediaListResponse>('/media')
-        expect(result.data.assets).toHaveLength(FIXTURE.length)
-        expect(result.data.total).toBe(FIXTURE.length)
+        expect(result.assets).toHaveLength(FIXTURE.length)
+        expect(result.total).toBe(FIXTURE.length)
     })
 
     it('narrows results by ?type= and reports the filtered total', async () => {
         const result = await api.get<MediaListResponse>('/media?type=audio')
-        expect(result.data.assets.every((a) => a.media_type === 'audio')).toBe(true)
-        expect(result.data.total).toBe(result.data.assets.length)
+        expect(result.assets.every((a) => a.media_type === 'audio')).toBe(true)
+        expect(result.total).toBe(result.assets.length)
     })
 
     it('paginates with ?page= and ?per_page=', async () => {
         const page1 = await api.get<MediaListResponse>('/media?page=1&per_page=2')
         const page2 = await api.get<MediaListResponse>('/media?page=2&per_page=2')
-        expect(page1.data.assets).toHaveLength(2)
-        expect(page1.data.page).toBe(1)
-        expect(page1.data.lastPage).toBeGreaterThan(1)
-        expect(page2.data.page).toBe(2)
-        expect(page2.data.assets[0]?.id).not.toBe(page1.data.assets[0]?.id)
+        expect(page1.assets).toHaveLength(2)
+        expect(page1.page).toBe(1)
+        expect(page1.lastPage).toBeGreaterThan(1)
+        expect(page2.page).toBe(2)
+        expect(page2.assets[0]?.id).not.toBe(page1.assets[0]?.id)
     })
 
     it('rejects write verbs', async () => {

@@ -23,11 +23,20 @@
  * is currently active in the slot.
  */
 export interface PluginHostContext {
+    /**
+     * The host's `spora-frontend/src/api/client.ts → request<T>()` unwraps
+     * the standard `{ data: T }` envelope before handing the value to the
+     * caller (see line 117: `body.data ?? body`). Plugins receive `T`
+     * directly — for the Media Archive list endpoint that's the flat
+     * `{ assets, page, perPage, total, lastPage }` shape, not a further
+     * envelope. The earlier `{ data: T }` shim was a guess at the wire
+     * shape that didn't match the host's unwrap.
+     */
     api: {
-        get: <T = unknown>(path: string) => Promise<{ data: T }>
-        post: <T = unknown>(path: string, body: unknown) => Promise<{ data: T }>
-        patch: <T = unknown>(path: string, body: unknown) => Promise<{ data: T }>
-        delete: <T = unknown>(path: string) => Promise<{ data: T }>
+        get: <T = unknown>(path: string) => Promise<T>
+        post: <T = unknown>(path: string, body: unknown) => Promise<T>
+        patch: <T = unknown>(path: string, body: unknown) => Promise<T>
+        delete: <T = unknown>(path: string) => Promise<T>
     }
     pinia: unknown
     theme: 'light' | 'dark'
