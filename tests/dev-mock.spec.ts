@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createMockApi, filterFixture, FIXTURE, paginate, parseListQuery } from '../src/dev-mock'
-import type { MediaAsset } from '../src/types'
+import type { MediaAsset, MediaListResponse } from '../src/types'
 
 describe('parseListQuery', () => {
     it('returns defaults when path has no query string', () => {
@@ -91,8 +91,8 @@ describe('createMockApi', () => {
     const api = createMockApi()
 
     it('returns a single asset by id', async () => {
-        const result = await api.get<{ data: MediaAsset }>('/media/demo-1')
-        expect(result.data.data.id).toBe('demo-1')
+        const result = await api.get<MediaAsset>('/media/demo-1')
+        expect(result.data.id).toBe('demo-1')
     })
 
     it('throws when the id is unknown', async () => {
@@ -100,29 +100,25 @@ describe('createMockApi', () => {
     })
 
     it('returns the full list envelope when /media is called without filters', async () => {
-        const result = await api.get<{ data: MediaAsset[]; meta: { total: number } }>('/media')
-        expect(result.data.data).toHaveLength(FIXTURE.length)
-        expect(result.data.meta.total).toBe(FIXTURE.length)
+        const result = await api.get<MediaListResponse>('/media')
+        expect(result.data.assets).toHaveLength(FIXTURE.length)
+        expect(result.data.total).toBe(FIXTURE.length)
     })
 
     it('narrows results by ?type= and reports the filtered total', async () => {
-        const result = await api.get<{ data: MediaAsset[]; meta: { total: number } }>('/media?type=audio')
-        expect(result.data.data.every((a) => a.media_type === 'audio')).toBe(true)
-        expect(result.data.meta.total).toBe(result.data.data.length)
+        const result = await api.get<MediaListResponse>('/media?type=audio')
+        expect(result.data.assets.every((a) => a.media_type === 'audio')).toBe(true)
+        expect(result.data.total).toBe(result.data.assets.length)
     })
 
     it('paginates with ?page= and ?per_page=', async () => {
-        const page1 = await api.get<{ data: MediaAsset[]; meta: { current_page: number; last_page: number } }>(
-            '/media?page=1&per_page=2',
-        )
-        const page2 = await api.get<{ data: MediaAsset[]; meta: { current_page: number } }>(
-            '/media?page=2&per_page=2',
-        )
-        expect(page1.data.data).toHaveLength(2)
-        expect(page1.data.meta.current_page).toBe(1)
-        expect(page1.data.meta.last_page).toBeGreaterThan(1)
-        expect(page2.data.meta.current_page).toBe(2)
-        expect(page2.data.data[0]?.id).not.toBe(page1.data.data[0]?.id)
+        const page1 = await api.get<MediaListResponse>('/media?page=1&per_page=2')
+        const page2 = await api.get<MediaListResponse>('/media?page=2&per_page=2')
+        expect(page1.data.assets).toHaveLength(2)
+        expect(page1.data.page).toBe(1)
+        expect(page1.data.lastPage).toBeGreaterThan(1)
+        expect(page2.data.page).toBe(2)
+        expect(page2.data.assets[0]?.id).not.toBe(page1.data.assets[0]?.id)
     })
 
     it('rejects write verbs', async () => {

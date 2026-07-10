@@ -157,22 +157,24 @@ export function createMockApi(): PluginHostContext['api'] {
                 const id = path.slice('/media/'.length).split('?')[0]
                 const found = FIXTURE.find((m) => m.id === id)
                 if (!found) throw new Error(`Not found: ${id}`)
-                return { data: { data: found } as T }
+                return { data: found as T }
             }
             if (path.startsWith('/media')) {
                 const query = parseListQuery(path)
                 const filtered = filterFixture(query)
                 const page = paginate(filtered, query.page, query.perPage)
                 const lastPage = Math.max(1, Math.ceil(filtered.length / query.perPage))
+                // The host's API client unwraps `body.data` before handing
+                // the value to the caller, so this mock returns the inner
+                // shape directly (not the `{ data: … }` envelope). Mirrors
+                // the unwrapped wire shape — see types.ts.
                 return {
                     data: {
-                        data: page,
-                        meta: {
-                            current_page: query.page,
-                            per_page: query.perPage,
-                            total: filtered.length,
-                            last_page: lastPage,
-                        },
+                        assets: page,
+                        page: query.page,
+                        perPage: query.perPage,
+                        total: filtered.length,
+                        lastPage: lastPage,
                     } as T,
                 }
             }
