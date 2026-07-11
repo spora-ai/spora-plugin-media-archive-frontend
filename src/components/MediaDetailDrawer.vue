@@ -30,7 +30,7 @@ const downloadName = computed(() => {
         @click.self="emit('close')"
     >
         <aside
-            class="flex h-full w-full max-w-md flex-col gap-4 overflow-y-auto bg-card p-6 shadow-xl"
+            class="flex h-full w-full max-w-md flex-col gap-4 overflow-y-auto bg-background p-6 shadow-xl"
             data-testid="media-drawer"
         >
             <header class="flex items-start justify-between gap-3">
