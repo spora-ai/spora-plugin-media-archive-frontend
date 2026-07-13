@@ -254,10 +254,12 @@ jobs:
           # Nothing else — no source code, no node_modules, no build
           # configs. The versioned root is what Composer's TarDownloader
           # (PHP's PharData) requires to extract the archive cleanly.
+          # The frontend/ subdir MUST be preserved verbatim so
+          # SporaPluginFrontendInstaller can find it after extraction.
           set -e
           STAGING=$(mktemp -d)
           mkdir -p "$STAGING/spora-plugin-media-archive-frontend-${TAG}"
-          cp -R frontend/. "$STAGING/spora-plugin-media-archive-frontend-${TAG}/"
+          cp -R frontend "$STAGING/spora-plugin-media-archive-frontend-${TAG}/"
           tar -czf /tmp/release-check.tar.gz -C "$STAGING" "spora-plugin-media-archive-frontend-${TAG}"
           PREFIX="spora-plugin-media-archive-frontend-${TAG}/"
           tar -tzf /tmp/release-check.tar.gz | head -20
@@ -268,7 +270,9 @@ jobs:
           # release tarball. Add to this list if a new non-runtime path
           # starts shipping by accident. Strip the versioned root before
           # matching so the regex sees only real frontend/ entries.
-          DENY_PATTERNS='(^|/)(\.git|\.github|node_modules|src|tests|coverage|scripts|package\.json|package-lock\.json|composer\.json|composer\.lock|vite\.config\.ts|tsconfig\.json|tailwind\.config\.ts|postcss\.config\.js|eslint\.config\.js|sonar-project\.properties|index\.html|README\.md|RELEASING\.md)$'
+          # main.js and style.css are ALLOWED inside frontend/ but DENIED
+          # at the top level (where they used to ship pre-v0.1.3).
+          DENY_PATTERNS='^((\.git|\.github|node_modules|src|tests|coverage|scripts|package\.json|package-lock\.json|composer\.json|composer\.lock|vite\.config\.ts|tsconfig\.json|tailwind\.config\.ts|postcss\.config\.js|eslint\.config\.js|sonar-project\.properties|index\.html|README\.md|RELEASING\.md|main\.js|style\.css)/?)$'
           LEAKED=$(tar -tzf /tmp/release-check.tar.gz | grep -E "^${PREFIX}" | sed "s|^${PREFIX}||" | grep -E "$DENY_PATTERNS" || true)
           if [ -n "$LEAKED" ]; then
             echo "::error::Release artifact contains non-runtime paths:"
@@ -282,13 +286,13 @@ jobs:
           # <style> block; this plugin relies on the host SPA's
           # Tailwind classes, so no <style> blocks and no style.css).
           for REQUIRED in main.js; do
-            if ! tar -tzf /tmp/release-check.tar.gz | grep -qx "^${PREFIX}${REQUIRED}"; then
-              echo "::error::Release artifact is missing required entry: ${PREFIX}${REQUIRED}"
+            if ! tar -tzf /tmp/release-check.tar.gz | grep -qx "^${PREFIX}frontend/${REQUIRED}"; then
+              echo "::error::Release artifact is missing required entry: ${PREFIX}frontend/${REQUIRED}"
               exit 1
             fi
           done
 
-          echo "OK: release artifact shape is correct (only frontend/ contents, under spora-plugin-media-archive-frontend-${TAG}/)."
+          echo "OK: release artifact shape is correct (only frontend/ contents, under spora-plugin-media-archive-frontend-${TAG}/frontend/)."
 
       - name: Package
         env:
@@ -299,10 +303,12 @@ jobs:
           # PharData) can extract the archive cleanly. The archive's
           # top entry must be "spora-plugin-media-archive-frontend-${TAG}/",
           # not "./" — the latter is what made spora-frontend v0.1.3 fail
-          # with "Cannot extract '.', internal error".
+          # with "Cannot extract '.', internal error". The frontend/
+          # subdir is preserved so SporaPluginFrontendInstaller's
+          # copyFrontend() can find it after LibraryInstaller extracts.
           rm -rf staging
           mkdir -p "staging/spora-plugin-media-archive-frontend-${TAG}"
-          cp -R frontend/. "staging/spora-plugin-media-archive-frontend-${TAG}/"
+          cp -R frontend "staging/spora-plugin-media-archive-frontend-${TAG}/"
           tar -czf "spora-plugin-media-archive-frontend-${TAG}.tar.gz" -C staging "spora-plugin-media-archive-frontend-${TAG}"
 
       - name: Create GitHub Release

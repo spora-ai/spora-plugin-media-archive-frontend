@@ -27,13 +27,14 @@ This package is published on Packagist as `spora-ai/spora-plugin-media-archive-f
 
 ## Release artifact shape
 
-The GitHub Release asset (`spora-plugin-media-archive-frontend-v<VERSION>.tar.gz`) contains **only the contents of `frontend/`** (the Vite IIFE bundle output — `main.js` and optionally `style.css`), under a single versioned root directory that matches the tag:
+The GitHub Release asset (`spora-plugin-media-archive-frontend-v<VERSION>.tar.gz`) contains **the `frontend/` directory verbatim** (the Vite IIFE bundle output — `main.js` and optionally `style.css`), under a single versioned root directory that matches the tag:
 
 ```
 spora-plugin-media-archive-frontend-v<VERSION>.tar.gz
 └── spora-plugin-media-archive-frontend-v<VERSION>/     # versioned root — required by PHP's PharData
-    ├── main.js                                          # the IIFE bundle (window.SporaAppMediaArchive = ...)
-    └── style.css                                        # Tailwind-compiled CSS (optional — only present when <style> blocks exist)
+    └── frontend/                                        # preserved as a subdir so the installer can find it
+        ├── main.js                                      # the IIFE bundle (window.SporaAppMediaArchive = ...)
+        └── style.css                                    # Tailwind-compiled CSS (optional — only present when <style> blocks exist)
 ```
 
 **Nothing else ships in the archive** — no source files, no `package.json`, no `node_modules`, no build configs. The release tarball is built explicitly from `frontend/` in the `build-and-release` workflow, and the `Verify only frontend/ is shipped` step in the same workflow fails the build if any non-`frontend/` path slips into the archive (deny-list + allow-list assertions).
@@ -66,12 +67,13 @@ This produces `spora-plugin-media-archive-frontend-v<X.Y.Z>/…` entries.
 
 If a release is broken, do NOT delete + retag the same version. Git tags are immutable. Instead, tag a new patch version (e.g. `v0.1.0` → `v0.1.1`) with the fix.
 
-## First release checklist (v0.1.0)
+## First release checklist (v0.1.3)
 
-The v0.1.0 release is the first time this package ships to Packagist. Confirm:
+The v0.1.3 release ships the corrected release artifact shape — `frontend/` is preserved as a subdir in the tarball, so `SporaPluginFrontendInstaller::copyFrontend()` (in `spora-installer`) can find it after `LibraryInstaller` extracts. Confirm:
 
-- [ ] `package.json` `version` is `0.1.0`
-- [ ] `composer.json` `dist.url` is `https://github.com/spora-ai/spora-plugin-media-archive-frontend/releases/download/v0.1.0/spora-plugin-media-archive-frontend-v0.1.0.tar.gz`
-- [ ] Companion PHP plugin PR (`spora-ai/spora-plugin-media-archive` PR #2) is ready to merge after this tag — `composer update spora-ai/spora-plugin-media-archive-frontend` will then resolve on Packagist
+- [ ] `package.json` `version` is `0.1.3`
+- [ ] `composer.json` `dist.url` is `https://github.com/spora-ai/spora-plugin-media-archive-frontend/releases/download/v0.1.3/spora-plugin-media-archive-frontend-v0.1.3.tar.gz`
+- [ ] `composer.json` `archive.exclude` no longer contains `/frontend` (otherwise `composer archive` strips it — see the "Release artifact shape" section above about defense-in-depth)
+- [ ] `ci.yml` `Verify only frontend/ is shipped` step updated to expect `frontend/main.js` under the versioned root
 - [ ] SonarCloud gate green on the `main` HEAD (the merged commits)
 - [ ] Lint + Test + Build jobs green on the `main` HEAD
