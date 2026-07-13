@@ -67,13 +67,13 @@ This produces `spora-plugin-media-archive-frontend-v<X.Y.Z>/…` entries.
 
 If a release is broken, do NOT delete + retag the same version. Git tags are immutable. Instead, tag a new patch version (e.g. `v0.1.0` → `v0.1.1`) with the fix.
 
-## First release checklist (v0.1.3)
+## First release checklist (v0.1.4)
 
-The v0.1.3 release ships the corrected release artifact shape — `frontend/` is preserved as a subdir in the tarball, so `SporaPluginFrontendInstaller::copyFrontend()` (in `spora-installer`) can find it after `LibraryInstaller` extracts. Confirm:
+The v0.1.4 release declares `extra.spora-plugin-slug = "media-archive"` in `composer.json` so `SporaPluginFrontendInstaller` (in `spora-installer`) routes the bundle to `public/plugins/media-archive/` — matching the slug emitted by `AppsController` and consumed by the host SPA's `/plugins/<slug>/main.js` lazy-load. Without this field, the install fails loud. Confirm:
 
-- [ ] `package.json` `version` is `0.1.3`
-- [ ] `composer.json` `dist.url` is `https://github.com/spora-ai/spora-plugin-media-archive-frontend/releases/download/v0.1.3/spora-plugin-media-archive-frontend-v0.1.3.tar.gz`
-- [ ] `composer.json` `archive.exclude` no longer contains `/frontend` (otherwise `composer archive` strips it — see the "Release artifact shape" section above about defense-in-depth)
-- [ ] `ci.yml` `Verify only frontend/ is shipped` step updated to expect `frontend/main.js` under the versioned root
-- [ ] SonarCloud gate green on the `main` HEAD (the merged commits)
+- [ ] `package.json` `version` is `0.1.4`
+- [ ] `composer.json` `dist.url` is `https://github.com/spora-ai/spora-plugin-media-archive-frontend/releases/download/v0.1.4/spora-plugin-media-archive-frontend-v0.1.4.tar.gz`
+- [ ] `composer.json` `extra.spora-plugin-slug` is `"media-archive"` (matches `plugin.json#slug` in `spora-plugin-media-archive`)
+- [ ] `ci.yml` `Verify only frontend/ is shipped` step still expects `frontend/main.js` under the versioned root (unchanged from v0.1.3)
+- [ ] SonarCloud gate green on the `main` HEAD
 - [ ] Lint + Test + Build jobs green on the `main` HEAD

@@ -1,7 +1,7 @@
 {
     "name": "spora-plugin-media-archive-frontend",
     "private": true,
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "Vue IIFE bundle for the Spora Media Archive admin panel. Built and shipped as type spora-plugin-frontend.",
     "type": "module",
     "scripts": {
