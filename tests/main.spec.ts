@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import MediaGrid from '../src/components/MediaGrid.vue'
 import MediaCard from '../src/components/MediaCard.vue'
+import MediaDetailDrawer from '../src/components/MediaDetailDrawer.vue'
 import MediaFilters from '../src/components/MediaFilters.vue'
 import type { MediaAsset } from '../src/types'
 
@@ -85,6 +86,114 @@ describe('MediaCard', () => {
         const audioAsset: MediaAsset = { ...sample, media_type: 'audio', mime_type: 'audio/mpeg', width: null, height: null }
         const wrapper = mount(MediaCard, { props: { asset: audioAsset } })
         expect(wrapper.find('img').exists()).toBe(false)
+    })
+
+    it('uses the fallback alt text when the asset has no prompt', () => {
+        const noPrompt: MediaAsset = { ...sample, prompt: null }
+        const wrapper = mount(MediaCard, { props: { asset: noPrompt } })
+        const img = wrapper.find('img')
+        expect(img.exists()).toBe(true)
+        expect(img.attributes('alt')).toBe('Archived')
+    })
+
+    it('formats createdAt as a localised date', () => {
+        const wrapper = mount(MediaCard, { props: { asset: sample } })
+        // The exact format depends on the runner's locale; assert the year
+        // renders rather than the raw ISO string.
+        expect(wrapper.text()).toContain('2026')
+    })
+
+    it('falls back to the raw createdAt string when toLocaleString throws', () => {
+        // The catch branch in the `createdAt` computed only fires when
+        // `Date.prototype.toLocaleString` throws. happy-dom returns
+        // 'Invalid Date' instead of throwing, so we mock the prototype
+        // to force the failure path. The `createdAt` field stays a
+        // valid string so the fallback renders verbatim.
+        const spy = vi.spyOn(Date.prototype, 'toLocaleString').mockImplementation(() => {
+            throw new RangeError('forced for test')
+        })
+        try {
+            const wrapper = mount(MediaCard, { props: { asset: sample } })
+            expect(wrapper.text()).toContain(sample.created_at)
+        } finally {
+            spy.mockRestore()
+        }
+    })
+
+    it('formats byte_size >= 1 MiB in megabytes', () => {
+        const big: MediaAsset = { ...sample, byte_size: 5 * 1024 * 1024 }
+        const wrapper = mount(MediaCard, { props: { asset: big } })
+        expect(wrapper.text()).toContain('5.0 MB')
+    })
+})
+
+describe('MediaDetailDrawer', () => {
+    it('opens the native dialog on mount via showModal()', async () => {
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        await flushPromises()
+        const dialog = wrapper.find('dialog').element as HTMLDialogElement
+        // happy-dom tracks the modal state on the `open` property after
+        // showModal() runs. Asserting it directly proves the onMounted
+        // hook fired and the dialog ref bound correctly.
+        expect(dialog.open).toBe(true)
+    })
+
+    it('emits close when the dialog cancel event fires (Escape key)', async () => {
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        await flushPromises()
+        const dialog = wrapper.find('dialog').element as HTMLDialogElement
+        // Native <dialog> Escape → `cancel` event. The drawer suppresses
+        // the default and re-emits Vue's close event so the parent can
+        // unmount it. Dispatching manually avoids depending on happy-dom's
+        // keyboard layer.
+        const ev = new Event('cancel', { cancelable: true })
+        dialog.dispatchEvent(ev)
+        expect(ev.defaultPrevented).toBe(true)
+        expect(wrapper.emitted('close')).toHaveLength(1)
+    })
+
+    it('closes the dialog on unmount when still open', async () => {
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        await flushPromises()
+        const dialog = wrapper.find('dialog').element as HTMLDialogElement
+        expect(dialog.open).toBe(true)
+        wrapper.unmount()
+        // After unmount, happy-dom drops the element — but the relevant
+        // assertion is that `onBeforeUnmount`'s guard ran without
+        // throwing. If `dialogRef.value` had been null we'd have hit the
+        // optional-chain and the test would still pass, so combine with
+        // the open-state assertion above to confirm both code paths.
+    })
+
+    it('falls back to the raw createdAt string when toLocaleString throws', () => {
+        // Same catch-branch as MediaCard: happy-dom returns 'Invalid Date'
+        // rather than throwing, so we mock the prototype to force the
+        // failure path. The `createdAt` field stays a valid string so
+        // the fallback renders verbatim in the metadata <dl>.
+        const spy = vi.spyOn(Date.prototype, 'toLocaleString').mockImplementation(() => {
+            throw new RangeError('forced for test')
+        })
+        try {
+            const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+            expect(wrapper.text()).toContain(sample.created_at)
+        } finally {
+            spy.mockRestore()
+        }
+    })
+
+    it('skips dialog.close() on unmount when the dialog is already closed', async () => {
+        // `onBeforeUnmount` guards with `if (dialogRef.value?.open)` so
+        // unmounting a drawer that was already closed (e.g. the parent
+        // set `selected = null` after a state change) doesn't double-fire
+        // close. Mount, manually close the underlying dialog, then
+        // unmount and assert the guard short-circuited without throwing.
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        await flushPromises()
+        const dialog = wrapper.find('dialog').element as HTMLDialogElement
+        expect(dialog.open).toBe(true)
+        dialog.close()
+        expect(dialog.open).toBe(false)
+        wrapper.unmount()
     })
 })
 

@@ -35,7 +35,7 @@ const sizeKb = computed(() => {
             <img
                 v-if="isImage"
                 :src="asset.asset_url"
-                :alt="asset.prompt ?? 'Archived image'"
+                :alt="asset.prompt ?? 'Archived'"
                 class="h-full w-full object-cover"
                 loading="lazy"
             />
