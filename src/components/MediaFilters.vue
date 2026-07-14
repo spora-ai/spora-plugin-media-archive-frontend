@@ -47,10 +47,12 @@ const selected = computed(() => props.type)
             </button>
         </div>
         <label class="relative block">
+            <span class="sr-only">Search</span>
             <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
                 type="search"
                 :value="search"
+                aria-label="Search"
                 placeholder="Search prompts and tags…"
                 class="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 data-testid="media-search"

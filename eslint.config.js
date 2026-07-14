@@ -32,6 +32,10 @@ export default [
         },
         rules: {
             '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+            // TypeScript already enforces undefined-identifier checks via
+            // `vue-tsc`; `no-undef` is redundant for browser/Vue code and
+            // false-positives on DOM types like HTMLDialogElement and Event.
+            'no-undef': 'off',
             'vue/multi-word-component-names': 'off',
             // The host SPA uses 4-space nesting inside <template> blocks for
             // readability when mixing nested v-for/v-if. We match that here
