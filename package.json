@@ -11,7 +11,7 @@
         "lint": "eslint .",
         "test": "vitest run",
         "test:coverage": "vitest run --coverage",
-        "smoke": "node --input-type=module -e \"import('node:fs/promises').then(async fs => { const txt = await fs.readFile('./frontend/main.js', 'utf8'); const ok = txt.includes('this.SporaAppMediaArchive=') && txt.includes('window.SporaAppMediaArchive=w,w') && /mount\\(t,o\\)/.test(txt) && /unmount\\(t\\)/.test(txt); console.log(ok ? 'OK' : 'FAIL'); process.exit(ok ? 0 : 1); })\"",
+        "smoke": "node scripts/smoke.js",
         "clean": "node scripts/clean.js"
     },
     "dependencies": {
