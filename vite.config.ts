@@ -68,17 +68,11 @@ export default defineConfig({
                 // Avoid the IIFE wrapper injecting inline `var` declarations
                 // that would shadow window properties the host relies on.
                 extend: true,
-                // Map externalised deps to their host-provided globals. With
-                // the default iife wrapper, Rollup emits the call site as
-                // `})(Vue, Pinia);` — passing bare identifiers that resolve
-                // to ReferenceErrors when the bundle is loaded as a module
-                // (the host's `apps/registry.ts` does
-                // `import('/plugins/<slug>/main.js')`, which evaluates the
-                // script in module scope where `Vue` and `Pinia` aren't free
-                // variables). Substituting the call-site expressions with
-                // `window.Vue` / `window.Pinia` looks up the host's already-
-                // published globals at evaluation time. The host SPA exposes
-                // `window.Vue` / `window.Pinia` for exactly this reason.
+                // Substitute the default `})(Vue, Pinia);` call site with
+                // `})(window.Vue, window.Pinia);` — bare identifiers resolve
+                // to ReferenceErrors when the host dynamic-imports the bundle
+                // (the IIFE evaluates in module scope where Vue/Pinia aren't
+                // free variables). The host SPA publishes these globals.
                 globals: {
                     vue: 'window.Vue',
                     pinia: 'window.Pinia',

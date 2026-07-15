@@ -11,7 +11,7 @@
         "type": "tar"
     },
     "extra": {
-        "_comment": "spora-plugin-slug MUST equal plugin.json#slug in the parent PHP plugin (spora-plugin-media-archive). The host SPA's /api/v1/apps emits that slug and lazy-loads /plugins/<slug>/main.js. SporaPluginFrontendInstaller refuses to install when this field is missing.",
+        "_comment": "Must equal plugin.json#slug in spora-plugin-media-archive; SporaPluginFrontendInstaller refuses to install when missing.",
         "spora-plugin-slug": "media-archive"
     },
     "archive": {

@@ -98,17 +98,14 @@ describe('MediaCard', () => {
 
     it('formats createdAt as a localised date', () => {
         const wrapper = mount(MediaCard, { props: { asset: sample } })
-        // The exact format depends on the runner's locale; assert the year
-        // renders rather than the raw ISO string.
+        // Exact format depends on the runner's locale; assert the year
+        // rather than the raw ISO string.
         expect(wrapper.text()).toContain('2026')
     })
 
     it('falls back to the raw createdAt string when toLocaleString throws', () => {
-        // The catch branch in the `createdAt` computed only fires when
-        // `Date.prototype.toLocaleString` throws. happy-dom returns
-        // 'Invalid Date' instead of throwing, so we mock the prototype
-        // to force the failure path. The `createdAt` field stays a
-        // valid string so the fallback renders verbatim.
+        // happy-dom returns 'Invalid Date' instead of throwing, so the
+        // prototype is mocked to force the catch path in the computed.
         const spy = vi.spyOn(Date.prototype, 'toLocaleString').mockImplementation(() => {
             throw new RangeError('forced for test')
         })
@@ -132,9 +129,6 @@ describe('MediaDetailDrawer', () => {
         const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
         await flushPromises()
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
-        // happy-dom tracks the modal state on the `open` property after
-        // showModal() runs. Asserting it directly proves the onMounted
-        // hook fired and the dialog ref bound correctly.
         expect(dialog.open).toBe(true)
     })
 
@@ -142,10 +136,8 @@ describe('MediaDetailDrawer', () => {
         const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
         await flushPromises()
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
-        // Native <dialog> Escape → `cancel` event. The drawer suppresses
-        // the default and re-emits Vue's close event so the parent can
-        // unmount it. Dispatching manually avoids depending on happy-dom's
-        // keyboard layer.
+        // Dispatch manually rather than depending on happy-dom's keyboard
+        // layer; the cancel event is what <dialog> fires on Escape.
         const ev = new Event('cancel', { cancelable: true })
         dialog.dispatchEvent(ev)
         expect(ev.defaultPrevented).toBe(true)
@@ -158,18 +150,10 @@ describe('MediaDetailDrawer', () => {
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
         expect(dialog.open).toBe(true)
         wrapper.unmount()
-        // After unmount, happy-dom drops the element — but the relevant
-        // assertion is that `onBeforeUnmount`'s guard ran without
-        // throwing. If `dialogRef.value` had been null we'd have hit the
-        // optional-chain and the test would still pass, so combine with
-        // the open-state assertion above to confirm both code paths.
     })
 
     it('falls back to the raw createdAt string when toLocaleString throws', () => {
-        // Same catch-branch as MediaCard: happy-dom returns 'Invalid Date'
-        // rather than throwing, so we mock the prototype to force the
-        // failure path. The `createdAt` field stays a valid string so
-        // the fallback renders verbatim in the metadata <dl>.
+        // See MediaCard test above for rationale.
         const spy = vi.spyOn(Date.prototype, 'toLocaleString').mockImplementation(() => {
             throw new RangeError('forced for test')
         })
@@ -182,11 +166,8 @@ describe('MediaDetailDrawer', () => {
     })
 
     it('skips dialog.close() on unmount when the dialog is already closed', async () => {
-        // `onBeforeUnmount` guards with `if (dialogRef.value?.open)` so
-        // unmounting a drawer that was already closed (e.g. the parent
-        // set `selected = null` after a state change) doesn't double-fire
-        // close. Mount, manually close the underlying dialog, then
-        // unmount and assert the guard short-circuited without throwing.
+        // Guards against double-firing close when the parent clears
+        // `selected` after we already dispatched cancel.
         const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
         await flushPromises()
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
@@ -199,17 +180,12 @@ describe('MediaDetailDrawer', () => {
 
 describe('mount contract', () => {
     it('exposes a mount function on the global when the bundle is loaded', async () => {
-        // The IIFE wrapper assigns to window.SporaAppMediaArchive at import time;
-        // we can't easily import the production bundle here (it's the built
-        // output), so we exercise the same contract via the dev entry by
-        // asserting that the registration site is reachable.
+        // Indirect smoke: if `SporaAppMediaArchive` is undefined the
+        // call below throws; reaching the end proves the global exists.
         const stub = vi.fn()
         const target = document.createElement('div')
         target.id = 'app'
         document.body.appendChild(target)
-        // Indirect smoke: if `SporaAppMediaArchive` is undefined (the bundle
-        // never ran), the call below throws. If it ran, it was either the
-        // real implementation or a stub — both prove the contract exists.
         const globalRef = (window as unknown as { SporaAppMediaArchive?: { mount: typeof stub } }).SporaAppMediaArchive
         if (globalRef) {
             globalRef.mount(target, {
@@ -220,7 +196,6 @@ describe('mount contract', () => {
                 router: null,
             })
         }
-        // No assertion needed — reaching this line means the contract exists.
         expect(true).toBe(true)
         document.body.removeChild(target)
     })
