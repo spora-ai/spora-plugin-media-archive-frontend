@@ -21,6 +21,8 @@ const sample: MediaAsset = {
     height: 64,
     duration_seconds: null,
     prompt: 'a tiny pixel',
+    filename: null,
+    tags: null,
     asset_url: 'data:image/png;base64,AAAA',
     source_url: null,
     storage_mode: 'data_url',

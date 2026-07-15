@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Copy, Download, ExternalLink, Eye, FileAudio, FileText, FileVideo, Image as ImageIcon, RefreshCw, Share2, Trash2, X } from 'lucide-vue-next'
+import { Copy, Download, ExternalLink, Eye, RefreshCw, Share2, Trash2, X } from 'lucide-vue-next'
 import type { MediaAsset } from '../types'
 
 const props = defineProps<{ asset: MediaAsset }>()

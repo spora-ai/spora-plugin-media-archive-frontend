@@ -15,6 +15,8 @@ const sample: MediaAsset = {
     height: 64,
     duration_seconds: null,
     prompt: 'a tiny pixel',
+    filename: null,
+    tags: null,
     asset_url: 'data:image/png;base64,AAAA',
     source_url: null,
     storage_mode: 'data_url',
@@ -46,20 +48,20 @@ describe('MediaGrid', () => {
 
 describe('MediaFilters', () => {
     it('emits update:type when a pill is clicked', async () => {
-        const wrapper = mount(MediaFilters, { props: { type: '', search: '' } })
+        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'all' } })
         await wrapper.find('[data-testid="media-type-image"]').trigger('click')
         expect(wrapper.emitted('update:type')?.[0]?.[0]).toBe('image')
     })
 
     it('emits update:search as the user types', async () => {
-        const wrapper = mount(MediaFilters, { props: { type: '', search: '' } })
+        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'all' } })
         const input = wrapper.find('[data-testid="media-search"]')
         await input.setValue('alpaca')
         expect(wrapper.emitted('update:search')?.[0]?.[0]).toBe('alpaca')
     })
 
     it('marks the active pill', () => {
-        const wrapper = mount(MediaFilters, { props: { type: 'audio', search: '' } })
+        const wrapper = mount(MediaFilters, { props: { type: 'audio', search: '', scope: 'all' } })
         const audio = wrapper.find('[data-testid="media-type-audio"]')
         // The active pill has the `bg-primary` class; the inactive ones don't.
         expect(audio.classes()).toContain('bg-primary')
