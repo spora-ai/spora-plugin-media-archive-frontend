@@ -68,14 +68,14 @@ export default defineConfig({
                 // Avoid the IIFE wrapper injecting inline `var` declarations
                 // that would shadow window properties the host relies on.
                 extend: true,
-                // Map externalised deps to their host-provided globals so the
-                // IIFE wrapper emits `var vue = window.Vue` instead of an
-                // unresolved reference. Vue 3 exposes its build via `window.Vue`,
-                // Pinia via `window.Pinia` — both are the UMD globals the host
-                // SPA already publishes.
+                // Substitute the default `})(Vue, Pinia);` call site with
+                // `})(window.Vue, window.Pinia);` — bare identifiers resolve
+                // to ReferenceErrors when the host dynamic-imports the bundle
+                // (the IIFE evaluates in module scope where Vue/Pinia aren't
+                // free variables). The host SPA publishes these globals.
                 globals: {
-                    vue: 'Vue',
-                    pinia: 'Pinia',
+                    vue: 'window.Vue',
+                    pinia: 'window.Pinia',
                 },
                 assetFileNames: (asset) => {
                     if (asset.name && asset.name.endsWith('.css')) {

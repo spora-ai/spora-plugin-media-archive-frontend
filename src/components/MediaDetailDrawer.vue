@@ -23,9 +23,8 @@ const downloadName = computed(() => {
 })
 
 function onCancel(event: Event): void {
-    // Native <dialog> Escape → cancel event. Suppress the default close so
-    // we can route it through Vue's `close` emit (the parent owns the
-    // `selected` ref that actually unmounts the drawer).
+    // Suppress <dialog>'s default close-on-Escape so the parent (which
+    // owns the unmount) sees a Vue close event instead.
     event.preventDefault()
     emit('close')
 }
@@ -35,8 +34,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-    // `close()` is a no-op when the dialog isn't open, but guards against
-    // unmounting mid-animation in case a future redesign introduces one.
     if (dialogRef.value?.open) {
         dialogRef.value.close()
     }
