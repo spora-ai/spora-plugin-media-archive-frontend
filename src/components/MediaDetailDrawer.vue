@@ -2,13 +2,25 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Copy, Download, ExternalLink, Eye, RefreshCw, Share2, Trash2, X } from 'lucide-vue-next'
 import type { MediaAsset } from '../types'
+import type { PluginHostContext } from '../shims'
 
-const props = defineProps<{ asset: MediaAsset }>()
+const props = defineProps<{
+    asset: MediaAsset
+    hostContext: PluginHostContext
+}>()
 const emit = defineEmits<{
     (event: 'close'): void
     (event: 'updated', asset: MediaAsset): void
     (event: 'deleted', id: string): void
 }>()
+
+/**
+ * Mutations go through `hostContext.api` rather than raw `fetch()` so the
+ * host client handles the `/api/v1` base, CSRF token, credentials, and
+ * `{ data: T }` envelope unwrap. The client throws `ApiError` on non-2xx,
+ * which is the success check we want — no need to inspect `.ok` ourselves.
+ */
+const api = computed(() => props.hostContext.api)
 
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxRef = ref<HTMLDialogElement | null>(null)
@@ -31,7 +43,7 @@ const toast = ref<string | null>(null)
 
 const editingField = ref<string | null>(null)
 const editValue = ref<string>('')
-const savingField = ref(false)
+const savingField = ref<string | null>(null)
 const errorMessage = ref<string | null>(null)
 
 function showToast(message: string): void {
@@ -78,45 +90,29 @@ watch(lightboxOpen, async (open) => {
 })
 
 async function toggleSharing(): Promise<void> {
-    savingField.value = true
-    errorMessage.value = null
-    try {
-        const host = props.asset.public_url
-            ? null
-            : 'enable'
-        const updated = await fetch(`/media/${props.asset.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ public_access_enabled: host !== null }),
-        }).then((r) => r.json())
-        if (updated?.data) {
-            emit('updated', updated.data as MediaAsset)
-            showToast(host !== null ? 'Sharing enabled' : 'Sharing disabled')
-        }
-    } catch (e) {
-        errorMessage.value = e instanceof Error ? e.message : String(e)
-    } finally {
-        savingField.value = false
+    const willEnable = props.asset.public_url === null || props.asset.public_url === undefined
+    const result = await mutate({
+        field: 'sharing',
+        verb: 'patch',
+        path: `/media/${props.asset.id}`,
+        body: { public_access_enabled: willEnable },
+        successToast: willEnable ? 'Sharing enabled' : 'Sharing disabled',
+    })
+    if (result?.updated) {
+        emit('updated', result.updated)
     }
 }
 
 async function refreshShareToken(): Promise<void> {
-    savingField.value = true
-    errorMessage.value = null
-    try {
-        const updated = await fetch(`/media/${props.asset.id}/public-token/refresh`, {
-            method: 'POST',
-            credentials: 'include',
-        }).then((r) => r.json())
-        if (updated?.data) {
-            emit('updated', updated.data as MediaAsset)
-            showToast('Public URL rotated')
-        }
-    } catch (e) {
-        errorMessage.value = e instanceof Error ? e.message : String(e)
-    } finally {
-        savingField.value = false
+    const result = await mutate({
+        field: 'sharing',
+        verb: 'post',
+        path: `/media/${props.asset.id}/public-token/refresh`,
+        body: undefined,
+        successToast: 'Public URL rotated',
+    })
+    if (result?.updated) {
+        emit('updated', result.updated)
     }
 }
 
@@ -125,50 +121,126 @@ function startEditing(field: string, current: string | null | undefined): void {
     editValue.value = current ?? ''
 }
 
-async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
-    savingField.value = true
+interface MutationOptions {
+    field: string
+    verb: 'patch' | 'post' | 'delete'
+    path: string
+    body?: unknown
+    successToast?: string
+}
+
+interface MutationResult {
+    updated?: MediaAsset
+}
+
+async function mutate(options: MutationOptions): Promise<MutationResult | null> {
+    if (savingField.value !== null) return null
+    savingField.value = options.field
     errorMessage.value = null
     try {
-        const body: Record<string, unknown> = {}
-        if (field === 'tags') {
-            body.tags = editValue.value.split(',').map((t) => t.trim()).filter((t) => t !== '')
-        } else {
-            body[field] = editValue.value
+        const client = api.value
+        const verb = options.verb
+        const request = verb === 'patch'
+            ? client.patch<MediaAsset>(options.path, options.body)
+            : verb === 'post'
+                ? client.post<MediaAsset>(options.path, options.body)
+                : client.delete<MediaAsset>(options.path)
+        const updated = await request
+        if (verb === 'delete') {
+            if (options.successToast) showToast(options.successToast)
+            return {}
         }
-        const updated = await fetch(`/media/${props.asset.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify(body),
-        }).then((r) => r.json())
-        if (updated?.data) {
-            emit('updated', updated.data as MediaAsset)
-            editingField.value = null
-            showToast(`${field} updated`)
+        if (updated) {
+            if (options.successToast) showToast(options.successToast)
+            return { updated }
         }
+        return {}
     } catch (e) {
         errorMessage.value = e instanceof Error ? e.message : String(e)
+        return null
     } finally {
-        savingField.value = false
+        savingField.value = null
     }
 }
 
-async function deleteAsset(): Promise<void> {
-    if (!confirm(`Delete ${props.asset.filename ?? 'this asset'}? This cannot be undone.`)) {
-        return
+async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
+    let body: Record<string, unknown>
+    if (field === 'filename') {
+        const trimmed = editValue.value.trim()
+        if (trimmed === '') {
+            errorMessage.value = 'Filename cannot be empty'
+            return
+        }
+        body = { filename: trimmed }
+    } else if (field === 'tags') {
+        body = {
+            tags: editValue.value
+                .split(',')
+                .map((t) => t.trim())
+                .filter((t) => t !== ''),
+        }
+    } else {
+        body = { prompt: editValue.value }
     }
-    try {
-        await fetch(`/media/${props.asset.id}`, {
-            method: 'DELETE',
-            credentials: 'include',
-        })
+    const result = await mutate({
+        field,
+        verb: 'patch',
+        path: `/media/${props.asset.id}`,
+        body,
+        successToast: `${field} updated`,
+    })
+    if (result?.updated) {
+        emit('updated', result.updated)
+        editingField.value = null
+    }
+}
+
+const deleteDialogRef = ref<HTMLDialogElement | null>(null)
+const lightboxTriggerRef = ref<HTMLElement | null>(null)
+
+function openDeleteDialog(): void {
+    deleteDialogRef.value?.showModal()
+}
+
+function closeDeleteDialog(): void {
+    if (deleteDialogRef.value?.open) {
+        deleteDialogRef.value.close()
+    }
+}
+
+async function confirmDelete(): Promise<void> {
+    closeDeleteDialog()
+    const result = await mutate({
+        field: 'delete',
+        verb: 'delete',
+        path: `/media/${props.asset.id}`,
+        successToast: 'Asset deleted',
+    })
+    if (result !== null) {
         emit('deleted', props.asset.id)
-    } catch (e) {
-        errorMessage.value = e instanceof Error ? e.message : String(e)
     }
+}
+
+function cancelEdit(): void {
+    editingField.value = null
 }
 
 const tagsString = computed(() => (props.asset.tags ?? []).join(', '))
+
+function safeExternalUrl(url: string | null | undefined): string | null {
+    if (url === null || url === undefined) return null
+    const trimmed = url.trim()
+    if (trimmed === '') return null
+    try {
+        const parsed = new URL(trimmed)
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            return parsed.toString()
+        }
+        return null
+    } catch {
+        return null
+    }
+}
 
 onMounted(() => {
     dialogRef.value?.showModal()
@@ -180,6 +252,10 @@ onBeforeUnmount(() => {
     }
     if (lightboxRef.value?.open) {
         lightboxRef.value.close()
+    }
+    if (lightboxTriggerRef.value !== null) {
+        lightboxTriggerRef.value.focus()
+        lightboxTriggerRef.value = null
     }
 })
 </script>
@@ -200,8 +276,8 @@ onBeforeUnmount(() => {
                 <h3
                     v-if="editingField !== 'filename'"
                     class="cursor-pointer truncate text-base font-semibold hover:bg-muted/40 rounded px-1 -mx-1"
-                    @click="startEditing('filename', asset.filename)"
                     :title="asset.filename ?? 'Click to set filename'"
+                    @click="startEditing('filename', asset.filename)"
                 >
                     {{ asset.filename ?? 'Untitled' }}
                     <span class="text-xs font-normal text-muted-foreground">· click to rename</span>
@@ -221,15 +297,16 @@ onBeforeUnmount(() => {
                     />
                     <button
                         type="submit"
-                        :disabled="savingField"
-                        class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground"
+                        :disabled="savingField !== null"
+                        class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
                     >
                         Save
                     </button>
                     <button
                         type="button"
-                        @click="editingField = null"
                         class="rounded px-2 py-1 text-xs text-muted-foreground"
+                        data-testid="filename-cancel"
+                        @click="cancelEdit"
                     >
                         Cancel
                     </button>
@@ -250,6 +327,7 @@ onBeforeUnmount(() => {
         <figure
             v-if="asset.media_type === 'image'"
             class="group relative cursor-zoom-in overflow-hidden rounded-lg border border-border bg-muted"
+            data-testid="media-preview-figure"
             @click="openLightbox"
         >
             <img :src="asset.asset_url" :alt="asset.prompt ?? 'Archived'" class="h-auto w-full" />
@@ -262,6 +340,8 @@ onBeforeUnmount(() => {
         <video
             v-else-if="asset.media_type === 'video'"
             controls
+            muted
+            playsinline
             class="w-full cursor-zoom-in rounded-lg border border-border"
             :src="asset.asset_url"
             data-testid="media-drawer-video"
@@ -302,18 +382,18 @@ onBeforeUnmount(() => {
             </a>
             <button
                 type="button"
-                @click="copyToClipboard(asset.id, 'UUID')"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                 data-testid="copy-uuid"
+                @click="copyToClipboard(asset.id, 'UUID')"
             >
                 <Copy class="h-3.5 w-3.5" />
                 Copy UUID
             </button>
             <button
                 type="button"
-                @click="copyToClipboard(asset.filename ?? asset.id, 'Filename')"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                 data-testid="copy-filename"
+                @click="copyToClipboard(asset.filename ?? asset.id, 'Filename')"
             >
                 <Copy class="h-3.5 w-3.5" />
                 Copy filename
@@ -331,30 +411,41 @@ onBeforeUnmount(() => {
                     <input
                         type="checkbox"
                         :checked="isShared"
-                        :disabled="savingField"
+                        :disabled="savingField !== null"
                         data-testid="public-sharing-toggle"
                         @change="toggleSharing"
                     />
-                    {{ isShared ? 'Enabled' : 'Disabled' }}
+                    <div role="status" aria-live="polite" data-testid="sharing-status">
+                        {{ isShared ? 'Enabled' : 'Disabled' }}
+                    </div>
                 </label>
             </div>
             <template v-if="isShared">
                 <div class="mt-3 rounded border border-border bg-background p-2 font-mono text-xs break-all">
                     {{ asset.public_url }}
                 </div>
+                <!--
+                    The backend (spora-core#137 → PublicMediaController::show) emits
+                    `Referrer-Policy: no-referrer` so the ?token=… query never leaks
+                    to third-party assets via Referer. The host copy-URL handler is
+                    a no-op once that header lands; this comment is the only place
+                    the UI knows about it.
+                -->
                 <div class="mt-2 flex flex-wrap gap-2">
                     <button
                         type="button"
-                        @click="copyToClipboard(asset.public_url ?? '', 'Public URL')"
                         class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
+                        data-testid="copy-public-url"
+                        @click="copyToClipboard(asset.public_url ?? '', 'Public URL')"
                     >
                         <Copy class="h-3 w-3" /> Copy URL
                     </button>
                     <button
                         type="button"
-                        @click="refreshShareToken"
-                        :disabled="savingField"
+                        :disabled="savingField !== null"
                         class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                        data-testid="refresh-public-token"
+                        @click="refreshShareToken"
                     >
                         <RefreshCw class="h-3 w-3" /> Refresh token
                     </button>
@@ -395,9 +486,10 @@ onBeforeUnmount(() => {
             <dd v-if="editingField !== 'tags'" class="col-span-2">
                 <button
                     type="button"
-                    @click="startEditing('tags', tagsString)"
                     class="cursor-pointer rounded px-1 -mx-1 text-left hover:bg-muted/40 w-full"
                     :title="'Click to edit tags'"
+                    data-testid="tags-edit-button"
+                    @click="startEditing('tags', tagsString)"
                 >
                     <span v-if="tagsString">{{ tagsString }}</span>
                     <span v-else class="italic text-muted-foreground">click to add tags</span>
@@ -412,7 +504,22 @@ onBeforeUnmount(() => {
                         class="flex-1 rounded border border-border bg-background px-2 py-1"
                         placeholder="tag1, tag2, tag3"
                     />
-                    <button type="submit" class="rounded bg-primary px-2 text-xs text-primary-foreground">Save</button>
+                    <button
+                        type="submit"
+                        :disabled="savingField !== null"
+                        class="rounded bg-primary px-2 text-xs text-primary-foreground disabled:opacity-50"
+                        data-testid="tags-save"
+                    >
+                        Save
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded px-2 text-xs text-muted-foreground"
+                        data-testid="tags-cancel"
+                        @click="cancelEdit"
+                    >
+                        Cancel
+                    </button>
                 </form>
             </dd>
 
@@ -425,14 +532,16 @@ onBeforeUnmount(() => {
                 <dt class="text-muted-foreground">Source</dt>
                 <dd class="col-span-2 break-all">
                     <a
-                        :href="asset.source_url"
+                        v-if="safeExternalUrl(asset.source_url) !== null"
+                        :href="safeExternalUrl(asset.source_url) ?? undefined"
                         target="_blank"
-                        rel="noopener"
+                        rel="noopener noreferrer"
                         class="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
                     >
                         {{ asset.source_url }}
                         <ExternalLink class="h-3 w-3" />
                     </a>
+                    <span v-else class="italic text-muted-foreground">Invalid source URL</span>
                 </dd>
             </template>
         </dl>
@@ -443,6 +552,7 @@ onBeforeUnmount(() => {
             <p
                 v-if="editingField !== 'prompt'"
                 class="cursor-pointer rounded-md bg-muted/60 p-3 text-sm text-foreground hover:bg-muted"
+                data-testid="prompt-edit-button"
                 @click="startEditing('prompt', asset.prompt)"
             >
                 {{ asset.prompt ?? '(no prompt — click to add)' }}
@@ -455,8 +565,22 @@ onBeforeUnmount(() => {
                     class="min-h-[80px] rounded border border-border bg-background p-2 text-sm"
                 ></textarea>
                 <div class="flex justify-end gap-2">
-                    <button type="button" @click="editingField = null" class="rounded px-3 py-1 text-xs text-muted-foreground">Cancel</button>
-                    <button type="submit" class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground">Save</button>
+                    <button
+                        type="button"
+                        class="rounded px-3 py-1 text-xs text-muted-foreground"
+                        data-testid="prompt-cancel"
+                        @click="cancelEdit"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        :disabled="savingField !== null"
+                        class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                        data-testid="prompt-save"
+                    >
+                        Save
+                    </button>
                 </div>
             </form>
         </section>
@@ -465,9 +589,9 @@ onBeforeUnmount(() => {
         <section class="mt-8 border-t border-destructive/30 pt-4">
             <button
                 type="button"
-                @click="deleteAsset"
                 class="inline-flex items-center gap-1.5 rounded border border-destructive/40 bg-background px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
                 data-testid="media-drawer-delete"
+                @click="openDeleteDialog"
             >
                 <Trash2 class="h-3.5 w-3.5" />
                 Delete asset
@@ -481,6 +605,7 @@ onBeforeUnmount(() => {
         v-if="lightboxOpen && (asset.media_type === 'image' || asset.media_type === 'video')"
         ref="lightboxRef"
         class="fixed inset-0 z-50 m-0 flex h-full w-full max-w-none items-center justify-center bg-foreground/80 p-4 backdrop:bg-foreground/80"
+        aria-modal="true"
         aria-label="Media preview"
         data-testid="media-lightbox"
         @cancel.prevent="closeLightbox"
@@ -491,6 +616,7 @@ onBeforeUnmount(() => {
             type="button"
             class="absolute right-4 top-4 rounded-full bg-background/90 p-2 text-foreground shadow"
             aria-label="Close lightbox"
+            data-testid="lightbox-close"
             @click="closeLightbox"
         >
             <X class="h-5 w-5" />
@@ -504,9 +630,11 @@ onBeforeUnmount(() => {
         <video
             v-else
             controls
-            autoplay
+            muted
+            playsinline
             :src="asset.asset_url"
             class="max-h-[90vh] max-w-[90vw] rounded shadow-2xl"
+            data-testid="lightbox-video"
         >
             <track
                 kind="captions"
@@ -518,9 +646,43 @@ onBeforeUnmount(() => {
         </video>
     </dialog>
 
+    <dialog
+        ref="deleteDialogRef"
+        class="rounded-lg p-6 backdrop:bg-foreground/40"
+        aria-labelledby="delete-title"
+        aria-describedby="delete-desc"
+        data-testid="delete-confirm-dialog"
+        @cancel.prevent="closeDeleteDialog"
+    >
+        <h2 id="delete-title" class="text-base font-semibold">Delete asset?</h2>
+        <p id="delete-desc" class="mt-2 text-sm text-muted-foreground">
+            {{ asset.filename ?? 'This asset' }} will be permanently deleted. This cannot be undone.
+        </p>
+        <div class="mt-4 flex justify-end gap-2">
+            <button
+                type="button"
+                class="rounded px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                data-testid="delete-cancel"
+                @click="closeDeleteDialog"
+            >
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="rounded bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+                data-testid="delete-confirm"
+                @click="confirmDelete"
+            >
+                Delete
+            </button>
+        </div>
+    </dialog>
+
     <!-- Toast -->
     <output
         v-if="toast"
+        aria-live="polite"
+        role="status"
         class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg"
         data-testid="media-toast"
     >

@@ -63,25 +63,3 @@ export interface MediaListQuery {
     pluginSlug?: string
     search?: string
 }
-
-export interface MediaDetailResponse {
-    // The host's client unwraps `{ data: T }`, so a single-asset
-    // detail fetch returns the asset directly, not the envelope.
-    id: string
-    media_type: MediaType
-    mime_type: string | null
-    byte_size: number | null
-    width: number | null
-    height: number | null
-    duration_seconds: number | null
-    prompt: string | null
-    asset_url: string
-    source_url: string | null
-    storage_mode: StorageMode
-    plugin_slug: string | null
-    tool_name: string | null
-    agent_id: string | null
-    task_id: string | null
-    tool_call_id: string | null
-    created_at: string
-}
