@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Copy, Download, ExternalLink, Eye, RefreshCw, Share2, Trash2, X } from 'lucide-vue-next'
 import type { MediaAsset } from '../types'
 
@@ -11,6 +11,7 @@ const emit = defineEmits<{
 }>()
 
 const dialogRef = ref<HTMLDialogElement | null>(null)
+const lightboxRef = ref<HTMLDialogElement | null>(null)
 
 const createdAt = computed(() => {
     try {
@@ -66,11 +67,15 @@ function closeLightbox(): void {
     lightboxOpen.value = false
 }
 
-function onLightboxKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-        closeLightbox()
+watch(lightboxOpen, async (open) => {
+    await nextTick()
+    const dialog = lightboxRef.value
+    if (open && dialog !== null && !dialog.open) {
+        dialog.showModal()
+    } else if (!open && dialog?.open) {
+        dialog.close()
     }
-}
+})
 
 async function toggleSharing(): Promise<void> {
     savingField.value = true
@@ -167,16 +172,15 @@ const tagsString = computed(() => (props.asset.tags ?? []).join(', '))
 
 onMounted(() => {
     dialogRef.value?.showModal()
-    if (lightboxOpen.value) {
-        document.addEventListener('keydown', onLightboxKeydown)
-    }
 })
 
 onBeforeUnmount(() => {
     if (dialogRef.value?.open) {
         dialogRef.value.close()
     }
-    document.removeEventListener('keydown', onLightboxKeydown)
+    if (lightboxRef.value?.open) {
+        lightboxRef.value.close()
+    }
 })
 </script>
 
@@ -207,7 +211,9 @@ onBeforeUnmount(() => {
                     class="flex items-center gap-2"
                     @submit.prevent="saveField('filename')"
                 >
+                    <label for="media-filename-input" class="sr-only">Filename</label>
                     <input
+                        id="media-filename-input"
                         v-model="editValue"
                         class="flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
                         autofocus
@@ -261,7 +267,13 @@ onBeforeUnmount(() => {
             data-testid="media-drawer-video"
             @click="openLightbox"
         >
-            <track kind="captions" srclang="en" label="No captions available" default />
+            <track
+                kind="captions"
+                src="data:text/vtt,WEBVTT%0A%0A"
+                srclang="en"
+                label="No captions available"
+                default
+            />
         </video>
         <audio
             v-else-if="asset.media_type === 'audio'"
@@ -393,7 +405,9 @@ onBeforeUnmount(() => {
             </dd>
             <dd v-else class="col-span-2">
                 <form class="flex gap-1" @submit.prevent="saveField('tags')">
+                    <label for="media-tags-input" class="sr-only">Tags</label>
                     <input
+                        id="media-tags-input"
                         v-model="editValue"
                         class="flex-1 rounded border border-border bg-background px-2 py-1"
                         placeholder="tag1, tag2, tag3"
@@ -434,7 +448,9 @@ onBeforeUnmount(() => {
                 {{ asset.prompt ?? '(no prompt — click to add)' }}
             </p>
             <form v-else class="flex flex-col gap-2" @submit.prevent="saveField('prompt')">
+                <label for="media-prompt-input" class="sr-only">Prompt</label>
                 <textarea
+                    id="media-prompt-input"
                     v-model="editValue"
                     class="min-h-[80px] rounded border border-border bg-background p-2 text-sm"
                 ></textarea>
@@ -461,18 +477,19 @@ onBeforeUnmount(() => {
         <p v-if="errorMessage" class="mt-3 rounded bg-destructive/10 p-2 text-xs text-destructive">{{ errorMessage }}</p>
     </dialog>
 
-    <!-- Lightbox overlay -->
-    <div
+    <dialog
         v-if="lightboxOpen && (asset.media_type === 'image' || asset.media_type === 'video')"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-foreground/80 p-4"
-        role="dialog"
-        aria-modal="true"
+        ref="lightboxRef"
+        class="fixed inset-0 z-50 m-0 flex h-full w-full max-w-none items-center justify-center bg-foreground/80 p-4 backdrop:bg-foreground/80"
+        aria-label="Media preview"
         data-testid="media-lightbox"
+        @cancel.prevent="closeLightbox"
+        @close="closeLightbox"
         @click.self="closeLightbox"
     >
         <button
             type="button"
-            class="absolute top-4 right-4 rounded-full bg-background/90 p-2 text-foreground shadow"
+            class="absolute right-4 top-4 rounded-full bg-background/90 p-2 text-foreground shadow"
             aria-label="Close lightbox"
             @click="closeLightbox"
         >
@@ -482,24 +499,31 @@ onBeforeUnmount(() => {
             v-if="asset.media_type === 'image'"
             :src="asset.asset_url"
             :alt="asset.prompt ?? 'Archived'"
-            class="max-h-[90vh] max-w-[90vw] rounded shadow-2xl object-contain"
+            class="max-h-[90vh] max-w-[90vw] rounded object-contain shadow-2xl"
         />
         <video
             v-else
             controls
-          autoplay
+            autoplay
             :src="asset.asset_url"
             class="max-h-[90vh] max-w-[90vw] rounded shadow-2xl"
-        />
-    </div>
+        >
+            <track
+                kind="captions"
+                src="data:text/vtt,WEBVTT%0A%0A"
+                srclang="en"
+                label="No captions available"
+                default
+            />
+        </video>
+    </dialog>
 
     <!-- Toast -->
-    <div
+    <output
         v-if="toast"
         class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg"
-        role="status"
         data-testid="media-toast"
     >
         {{ toast }}
-    </div>
+    </output>
 </template>
