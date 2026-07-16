@@ -8,6 +8,7 @@ describe('parseListQuery', () => {
             type: '',
             plugin: '',
             search: '',
+            scope: 'all',
             page: 1,
             perPage: 24,
         })
@@ -18,9 +19,16 @@ describe('parseListQuery', () => {
             type: 'audio',
             plugin: 'minimax',
             search: 'hello',
+            scope: 'all',
             page: 2,
             perPage: 5,
         })
+    })
+
+    it('parses scope=mine and defaults to all', () => {
+        expect(parseListQuery('/media?scope=mine').scope).toBe('mine')
+        expect(parseListQuery('/media?scope=other').scope).toBe('all')
+        expect(parseListQuery('/media').scope).toBe('all')
     })
 
     it('lowercases and trims the search term', () => {
@@ -43,33 +51,41 @@ describe('filterFixture', () => {
     const corpus: MediaAsset[] = FIXTURE
 
     it('returns the full fixture when no filters are set', () => {
-        expect(filterFixture({ type: '', plugin: '', search: '', page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
+        expect(filterFixture({ type: '', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
     })
 
     it('filters by media_type', () => {
-        const result = filterFixture({ type: 'image', plugin: '', search: '', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.length).toBeGreaterThan(0)
         expect(result.every((a) => a.media_type === 'image')).toBe(true)
     })
 
     it('filters by plugin_slug', () => {
-        const result = filterFixture({ type: '', plugin: 'tavily', search: '', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: 'tavily', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.plugin_slug === 'tavily')).toBe(true)
     })
 
     it('filters by case-insensitive prompt substring', () => {
-        const result = filterFixture({ type: '', plugin: '', search: 'alpine', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: '', search: 'alpine', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.some((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
         expect(result.every((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
     })
 
     it('combines multiple filters with AND semantics', () => {
-        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.media_type === 'image' && a.plugin_slug === 'minimax')).toBe(true)
     })
 
     it('returns an empty array when nothing matches', () => {
-        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', page: 1, perPage: 24 }, corpus)).toEqual([])
+        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toEqual([])
+    })
+
+    it('filters by scope=mine to the current user only', () => {
+        const mine = filterFixture({ type: '', plugin: '', search: '', scope: 'mine', page: 1, perPage: 24 }, corpus)
+        expect(mine.length).toBeGreaterThan(0)
+        expect(mine.every((a) => (a as unknown as { user_id: number }).user_id === 42)).toBe(true)
+        const all = filterFixture({ type: '', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        expect(all.length).toBeGreaterThan(mine.length)
     })
 })
 

@@ -5,17 +5,22 @@
  * `dev-main.ts`.
  *
  * The mock honors the same query params the PHP controller supports
- * (`type`, `plugin`, `search`, `page`, `per_page`) so the filter UI
- * is exercisable end-to-end without a database. For real DB-backed
+ * (`type`, `plugin`, `search`, `scope`, `page`, `per_page`) so the filter
+ * UI is exercisable end-to-end without a database. For real DB-backed
  * testing, run the host SPA + this plugin's dev server + PHP together
  * (see `spora-frontend/vite.config.ts → SPORA_PLUGIN_DEV_PORTS`).
  */
 import type { MediaAsset } from './types'
 import type { PluginHostContext } from './shims'
 
-export const FIXTURE: MediaAsset[] = [
+interface MockAsset extends MediaAsset {
+    user_id: number
+}
+
+export const FIXTURE: MockAsset[] = [
     {
         id: 'demo-1',
+        user_id: 42,
         media_type: 'image',
         mime_type: 'image/png',
         byte_size: 12345,
@@ -23,6 +28,8 @@ export const FIXTURE: MediaAsset[] = [
         height: 1024,
         duration_seconds: null,
         prompt: 'A serene alpine lake at golden hour',
+        filename: null,
+        tags: null,
         asset_url: 'https://placehold.co/600x400/png',
         source_url: 'https://example.com/cdn/foo.png',
         storage_mode: 'external',
@@ -35,6 +42,7 @@ export const FIXTURE: MediaAsset[] = [
     },
     {
         id: 'demo-2',
+        user_id: 42,
         media_type: 'audio',
         mime_type: 'audio/mpeg',
         byte_size: 56789,
@@ -42,6 +50,8 @@ export const FIXTURE: MediaAsset[] = [
         height: null,
         duration_seconds: 12.5,
         prompt: 'Welcome to the daily briefing',
+        filename: null,
+        tags: null,
         asset_url: 'https://placehold.co/600x400/mp3',
         source_url: null,
         storage_mode: 'local',
@@ -54,6 +64,7 @@ export const FIXTURE: MediaAsset[] = [
     },
     {
         id: 'demo-3',
+        user_id: 99,
         media_type: 'image',
         mime_type: 'image/jpeg',
         byte_size: 234567,
@@ -61,6 +72,8 @@ export const FIXTURE: MediaAsset[] = [
         height: 1080,
         duration_seconds: null,
         prompt: 'A product photo on a marble counter',
+        filename: null,
+        tags: null,
         asset_url: 'https://placehold.co/600x400/jpeg',
         source_url: null,
         storage_mode: 'external',
@@ -73,6 +86,7 @@ export const FIXTURE: MediaAsset[] = [
     },
     {
         id: 'demo-4',
+        user_id: 99,
         media_type: 'video',
         mime_type: 'video/mp4',
         byte_size: 4567890,
@@ -80,6 +94,8 @@ export const FIXTURE: MediaAsset[] = [
         height: 1080,
         duration_seconds: 45.2,
         prompt: 'A drone shot of a coastal city at dusk',
+        filename: null,
+        tags: null,
         asset_url: 'https://placehold.co/600x400/mp4',
         source_url: null,
         storage_mode: 'external',
@@ -92,6 +108,7 @@ export const FIXTURE: MediaAsset[] = [
     },
     {
         id: 'demo-5',
+        user_id: 42,
         media_type: 'document',
         mime_type: 'application/pdf',
         byte_size: 89012,
@@ -99,6 +116,8 @@ export const FIXTURE: MediaAsset[] = [
         height: null,
         duration_seconds: null,
         prompt: 'Quarterly earnings summary',
+        filename: null,
+        tags: null,
         asset_url: 'https://placehold.co/600x400/pdf',
         source_url: null,
         storage_mode: 'local',
@@ -111,10 +130,15 @@ export const FIXTURE: MediaAsset[] = [
     },
 ]
 
+export const CURRENT_USER_ID = 42
+
+export type Scope = 'all' | 'mine'
+
 export interface ListQuery {
     type: string
     plugin: string
     search: string
+    scope: Scope
     page: number
     perPage: number
 }
@@ -124,17 +148,24 @@ export function parseListQuery(path: string): ListQuery {
     const params = new URLSearchParams(queryString)
     const pageRaw = params.get('page')
     const perPageRaw = params.get('per_page')
+    const scopeRaw = params.get('scope')
+    const scope: Scope = scopeRaw === 'mine' ? 'mine' : 'all'
     return {
         type: params.get('type') ?? '',
         plugin: params.get('plugin') ?? '',
         search: (params.get('search') ?? '').trim().toLowerCase(),
+        scope,
         page: pageRaw === null ? 1 : Math.max(1, Number(pageRaw) || 1),
         perPage: perPageRaw === null ? 24 : Math.max(1, Number(perPageRaw) || 1),
     }
 }
 
-export function filterFixture(query: ListQuery, source: MediaAsset[] = FIXTURE): MediaAsset[] {
+export function filterFixture(query: ListQuery, source: MediaAsset[] = FIXTURE as MediaAsset[], currentUserId: number = CURRENT_USER_ID): MediaAsset[] {
     return source.filter((asset) => {
+        if (query.scope === 'mine') {
+            const ownerId = (asset as MediaAsset & { user_id?: number | null }).user_id
+            if (ownerId !== currentUserId) return false
+        }
         if (query.type && asset.media_type !== query.type) return false
         if (query.plugin && asset.plugin_slug !== query.plugin) return false
         if (query.search) {

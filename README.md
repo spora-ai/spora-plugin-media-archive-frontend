@@ -8,6 +8,18 @@ Pre-built Vue SPA for the Spora **Media Archive** admin panel. Delivered as a Co
 - Backend-only operators can `composer require spora-ai/spora-plugin-media-archive` without pulling in npm-buildable assets.
 - The bundle is independently testable in isolation (Vitest + the smoke script).
 
+## Detail-drawer affordances
+
+The detail drawer (right-side panel that opens when a card is selected) covers the operational lifecycle of a media asset:
+
+- Inline rename of the filename, tags, and prompt via accessible `<form>` edit patterns (click-to-edit, Esc/Cancel reverts).
+- Public-share toggle, copy-URL, and token rotation — all routed through the host's typed API client (`hostContext.api`) so CSRF, base URL, and envelope unwrap are handled centrally.
+- Delete confirmation via a real `<dialog>` element (replaces the old `window.confirm`) with a focus-trapped Cancel/Delete pair.
+- Lightbox preview for image and video assets with `aria-modal="true"`, save-and-restore focus on close, and `Escape` / click-outside dismissal.
+- Safe external source link: only `http(s)` schemes render as anchors; `javascript:` and other schemes show an "Invalid source URL" hint instead.
+- Live region (`role="status"` + `aria-live="polite"`) announces sharing state and toast notifications to assistive tech.
+- All edit-save buttons disable while a save is in flight so the user cannot double-submit a conflicting PATCH.
+
 ## Build
 
 ```bash
