@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Image, FileAudio, FileVideo, FileText, Search } from 'lucide-vue-next'
 import type { PluginHostContext } from './shims'
 import type { MediaAsset, MediaListQuery, MediaListResponse, MediaType } from './types'
@@ -26,7 +26,17 @@ const scope = ref<'all' | 'mine'>('all')
 const total = ref(0)
 const selected = ref<MediaAsset | null>(null)
 
+/**
+ * Monotonic `requestId` guard against stale responses from rapid filter
+ * changes. When the user flips type/search/scope faster than the network
+ * replies, only the latest result is allowed to update the grid. We also
+ * flip `loading` off only for the latest request so the indicator does
+ * not flicker between transitions.
+ */
+let requestId = 0
+
 async function load(): Promise<void> {
+    const myId = ++requestId
     loading.value = true
     error.value = null
     try {
@@ -40,12 +50,16 @@ async function load(): Promise<void> {
         const response = await api.value.get<MediaListResponse>(
             `/media?${params.toString()}`,
         )
+        if (myId !== requestId) return
         assets.value = response.assets
         total.value = response.total
     } catch (e) {
+        if (myId !== requestId) return
         error.value = e instanceof Error ? e.message : String(e)
     } finally {
-        loading.value = false
+        if (myId === requestId) {
+            loading.value = false
+        }
     }
 }
 
@@ -90,6 +104,11 @@ function onAssetDeleted(id: string): void {
 }
 
 onMounted(load)
+
+onBeforeUnmount(() => {
+    // Bumping the id invalidates any pending response.
+    requestId++
+})
 </script>
 
 <template>
@@ -119,6 +138,7 @@ onMounted(load)
         <MediaDetailDrawer
             v-if="selected"
             :asset="selected"
+            :host-context="hostContext"
             @close="closeDrawer"
             @updated="onAssetUpdated"
             @deleted="onAssetDeleted"
