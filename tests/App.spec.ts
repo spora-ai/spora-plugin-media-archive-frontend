@@ -99,6 +99,62 @@ describe('App.vue', () => {
         expect(wrapper.text()).not.toContain('1 assets')
     })
 
+    it('renders "10 assets" (plural) when total is 10', async () => {
+        const get = vi.fn().mockResolvedValueOnce({
+            assets: [sample],
+            page: 1,
+            perPage: 24,
+            total: 10,
+            lastPage: 1,
+        })
+        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.text()).toContain('10 assets')
+    })
+
+    it('passes scope=mine to the API when the scope toggle is flipped', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        await flushPromises()
+        await flushPromises()
+        expect(get).toHaveBeenCalledTimes(1)
+        await wrapper.find('[data-testid="media-scope-mine"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        expect(get).toHaveBeenCalledTimes(2)
+        expect(get.mock.calls[1]?.[0]).toContain('scope=mine')
+    })
+
+    it('drops stale responses when filters change faster than the network', async () => {
+        // Use real timers for this test so we can resolve promises in
+        // deterministic order without depending on fake-timer flush semantics.
+        vi.useRealTimers()
+        const captured: { resolve: ((v: MediaListResponse) => void) | null } = { resolve: null }
+        const slowPromise = new Promise<MediaListResponse>((resolve) => {
+            captured.resolve = resolve
+        })
+        const fastResult: MediaListResponse = { assets: [], page: 1, perPage: 24, total: 0, lastPage: 1 }
+        const slowResult: MediaListResponse = { assets: [sample], page: 1, perPage: 24, total: 1, lastPage: 1 }
+        const get = vi.fn()
+            .mockReturnValueOnce(slowPromise)
+            .mockResolvedValueOnce(fastResult)
+        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        // Allow the initial (slow) call to settle as pending.
+        await flushPromises()
+        // Trigger a filter change — this should swap to the fast call.
+        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        // Now resolve the stale (initial) request — its handler must bail
+        // out because the requestId has advanced.
+        captured.resolve?.(slowResult)
+        await flushPromises()
+        // The grid must reflect the second (fast) response, not the slow one.
+        const heading = wrapper.find('header p').text()
+        expect(heading).toContain('0 assets')
+    })
+
     it('surfaces the error when /media fails', async () => {
         const get = vi.fn().mockRejectedValueOnce(new Error('Boom'))
         const wrapper = mount(App, { props: { hostContext: buildContext(get) } })

@@ -5,6 +5,32 @@ import MediaCard from '../src/components/MediaCard.vue'
 import MediaDetailDrawer from '../src/components/MediaDetailDrawer.vue'
 import MediaFilters from '../src/components/MediaFilters.vue'
 import type { MediaAsset } from '../src/types'
+import type { PluginHostContext } from '../src/shims'
+
+function buildHostContext(): {
+    hostContext: PluginHostContext
+    api: {
+        get: ReturnType<typeof vi.fn>
+        post: ReturnType<typeof vi.fn>
+        patch: ReturnType<typeof vi.fn>
+        delete: ReturnType<typeof vi.fn>
+    }
+} {
+    const api = {
+        get: vi.fn(),
+        post: vi.fn(),
+        patch: vi.fn(),
+        delete: vi.fn(),
+    }
+    const hostContext: PluginHostContext = {
+        api: api as unknown as PluginHostContext['api'],
+        pinia: null,
+        theme: 'light',
+        route: null,
+        router: null,
+    }
+    return { hostContext, api }
+}
 
 const sample: MediaAsset = {
     id: 'test-1',
@@ -128,14 +154,16 @@ describe('MediaCard', () => {
 
 describe('MediaDetailDrawer', () => {
     it('opens the native dialog on mount via showModal()', async () => {
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
         expect(dialog.open).toBe(true)
     })
 
     it('emits close when the dialog cancel event fires (Escape key)', async () => {
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
         // Dispatch manually rather than depending on happy-dom's keyboard
@@ -147,7 +175,8 @@ describe('MediaDetailDrawer', () => {
     })
 
     it('closes the dialog on unmount when still open', async () => {
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
         expect(dialog.open).toBe(true)
@@ -160,7 +189,8 @@ describe('MediaDetailDrawer', () => {
             throw new RangeError('forced for test')
         })
         try {
-            const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+            const { hostContext } = buildHostContext()
+            const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
             expect(wrapper.text()).toContain(sample.created_at)
         } finally {
             spy.mockRestore()
@@ -170,7 +200,8 @@ describe('MediaDetailDrawer', () => {
     it('skips dialog.close() on unmount when the dialog is already closed', async () => {
         // Guards against double-firing close when the parent clears
         // `selected` after we already dispatched cancel.
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         const dialog = wrapper.find('dialog').element as HTMLDialogElement
         expect(dialog.open).toBe(true)
@@ -182,7 +213,8 @@ describe('MediaDetailDrawer', () => {
     it('copies the asset UUID to the clipboard', async () => {
         const writeText = vi.fn().mockResolvedValue(undefined)
         Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         const copyBtn = wrapper.find('[data-testid="copy-uuid"]')
         await copyBtn.trigger('click')
@@ -194,7 +226,8 @@ describe('MediaDetailDrawer', () => {
     it('falls back to a denial toast when clipboard access fails', async () => {
         const writeText = vi.fn().mockRejectedValue(new Error('denied'))
         Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         await wrapper.find('[data-testid="copy-uuid"]').trigger('click')
         await flushPromises()
@@ -204,7 +237,8 @@ describe('MediaDetailDrawer', () => {
     it('copies the filename (or UUID when filename is null) via the copy filename button', async () => {
         const writeText = vi.fn().mockResolvedValue(undefined)
         Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: 'shot.png' } } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: 'shot.png' }, hostContext } })
         await flushPromises()
         await wrapper.find('[data-testid="copy-filename"]').trigger('click')
         await flushPromises()
@@ -214,7 +248,8 @@ describe('MediaDetailDrawer', () => {
     it('falls back to copying the UUID when the filename is null', async () => {
         const writeText = vi.fn().mockResolvedValue(undefined)
         Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: null } } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: null }, hostContext } })
         await flushPromises()
         await wrapper.find('[data-testid="copy-filename"]').trigger('click')
         await flushPromises()
@@ -222,37 +257,34 @@ describe('MediaDetailDrawer', () => {
     })
 
     it('enables public sharing when the toggle is on', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ data: { ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=abc' } })
-        vi.stubGlobal('fetch', fetchMock)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext, api } = buildHostContext()
+        api.patch.mockResolvedValue({ ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=abc' })
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         const toggle = wrapper.find('[data-testid="public-sharing-toggle"]')
         await toggle.setValue(true)
         await flushPromises()
-        expect(fetchMock).toHaveBeenCalledTimes(1)
-        const [url, init] = fetchMock.mock.calls[0]
-        expect(url).toBe(`/media/${sample.id}`)
-        expect(init.method).toBe('PATCH')
-        expect(JSON.parse(init.body)).toEqual({ public_access_enabled: true })
-        const updated = fetchMock.mock.results[0].value
-        expect((await updated).data.public_url).toContain('?token=abc')
+        expect(api.patch).toHaveBeenCalledTimes(1)
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { public_access_enabled: true })
+        expect(wrapper.emitted('updated')?.[0]?.[0]).toMatchObject({ public_url: expect.stringContaining('?token=abc') })
     })
 
     it('disables public sharing when the toggle is off', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ data: { ...sample, public_url: null } })
-        vi.stubGlobal('fetch', fetchMock)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=abc' } } })
+        const { hostContext, api } = buildHostContext()
+        api.patch.mockResolvedValue({ ...sample, public_url: null })
+        const shared: MediaAsset = { ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=abc' }
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: shared, hostContext } })
         await flushPromises()
         const toggle = wrapper.find('[data-testid="public-sharing-toggle"]')
         await toggle.setValue(false)
         await flushPromises()
-        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ public_access_enabled: false })
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { public_access_enabled: false })
     })
 
     it('surfaces the public-sharing toggle error in the error panel', async () => {
-        const fetchMock = vi.fn().mockRejectedValue(new Error('sharing failed'))
-        vi.stubGlobal('fetch', fetchMock)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext, api } = buildHostContext()
+        api.patch.mockRejectedValue(new Error('sharing failed'))
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         await wrapper.find('[data-testid="public-sharing-toggle"]').setValue(true)
         await flushPromises()
@@ -260,35 +292,34 @@ describe('MediaDetailDrawer', () => {
     })
 
     it('refreshes the public-access token', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ data: { ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=fresh' } })
-        vi.stubGlobal('fetch', fetchMock)
+        const { hostContext, api } = buildHostContext()
+        api.post.mockResolvedValue({ ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=fresh' })
         const shared: MediaAsset = { ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=old' }
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: shared } })
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: shared, hostContext } })
         await flushPromises()
-        const refreshBtn = wrapper.findAll('button').find((b) => b.text().includes('Refresh token'))!
-        await refreshBtn.trigger('click')
+        await wrapper.find('[data-testid="refresh-public-token"]').trigger('click')
         await flushPromises()
-        expect(fetchMock).toHaveBeenCalledWith(`/media/${sample.id}/public-token/refresh`, expect.objectContaining({ method: 'POST' }))
-        const updated = fetchMock.mock.results[0].value
-        expect((await updated).data.public_url).toContain('?token=fresh')
+        expect(api.post).toHaveBeenCalledWith(`/media/${sample.id}/public-token/refresh`, undefined)
+        expect(wrapper.emitted('updated')?.[0]?.[0]).toMatchObject({ public_url: expect.stringContaining('?token=fresh') })
     })
 
     it('copies the public URL to the clipboard when the share section is open', async () => {
         const writeText = vi.fn().mockResolvedValue(undefined)
         Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
         const url = 'https://example.test/api/v1/public/media/' + sample.id + '?token=abc'
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, public_url: url } } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, public_url: url }, hostContext } })
         await flushPromises()
-        const copyUrlBtn = wrapper.findAll('button').find((b) => b.text().trim() === 'Copy URL')!
-        await copyUrlBtn.trigger('click')
+        await wrapper.find('[data-testid="copy-public-url"]').trigger('click')
         await flushPromises()
         expect(writeText).toHaveBeenCalledWith(url)
     })
 
     it('opens and closes the lightbox via the image element click', async () => {
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
-        const figure = wrapper.find('figure.cursor-zoom-in')
+        const figure = wrapper.find('[data-testid="media-preview-figure"]')
         expect(figure.exists()).toBe(true)
         await figure.trigger('click')
         await flushPromises()
@@ -298,26 +329,28 @@ describe('MediaDetailDrawer', () => {
 
     it('does not render the lightbox overlay for non-image assets', async () => {
         const audio: MediaAsset = { ...sample, media_type: 'audio', mime_type: 'audio/mpeg' }
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: audio } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: audio, hostContext } })
         await flushPromises()
         expect(wrapper.find('[data-testid="media-lightbox"]').exists()).toBe(false)
     })
 
     it('closes the lightbox via the close button', async () => {
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
-        await wrapper.find('figure.cursor-zoom-in').trigger('click')
+        await wrapper.find('[data-testid="media-preview-figure"]').trigger('click')
         await flushPromises()
-        const closeBtn = wrapper.find('button[aria-label="Close lightbox"]')
+        const closeBtn = wrapper.find('[data-testid="lightbox-close"]')
         await closeBtn.trigger('click')
         await flushPromises()
         expect(wrapper.find('[data-testid="media-lightbox"]').exists()).toBe(false)
     })
 
     it('starts and saves the filename inline edit', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ data: { ...sample, filename: 'renamed.png' } })
-        vi.stubGlobal('fetch', fetchMock)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext, api } = buildHostContext()
+        api.patch.mockResolvedValue({ ...sample, filename: 'renamed.png' })
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         await wrapper.find('h3.cursor-pointer').trigger('click')
         await flushPromises()
@@ -327,17 +360,44 @@ describe('MediaDetailDrawer', () => {
         const form = input.element.closest('form')!
         await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
         await flushPromises()
-        expect(fetchMock).toHaveBeenCalledWith(`/media/${sample.id}`, expect.objectContaining({ method: 'PATCH' }))
-        const body = JSON.parse(fetchMock.mock.calls[0][1].body)
-        expect(body).toMatchObject({ filename: 'renamed.png' })
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { filename: 'renamed.png' })
+    })
+
+    it('cancels the filename inline edit without issuing a PATCH', async () => {
+        const { hostContext, api } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
+        await flushPromises()
+        await wrapper.find('h3.cursor-pointer').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        await input.setValue('never-saved')
+        await wrapper.find('[data-testid="filename-cancel"]').trigger('click')
+        await flushPromises()
+        expect(api.patch).not.toHaveBeenCalled()
+        expect(wrapper.find('input[data-testid="filename-input"]').exists()).toBe(false)
+    })
+
+    it('rejects an empty filename and does not issue a PATCH', async () => {
+        const { hostContext, api } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
+        await flushPromises()
+        await wrapper.find('h3.cursor-pointer').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        await input.setValue('   ')
+        const form = input.element.closest('form')!
+        await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+        await flushPromises()
+        expect(api.patch).not.toHaveBeenCalled()
+        expect(wrapper.text()).toContain('Filename cannot be empty')
     })
 
     it('saves tags as a comma-separated array', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ data: { ...sample, tags: ['draft', 'redacted'] } })
-        vi.stubGlobal('fetch', fetchMock)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext, api } = buildHostContext()
+        api.patch.mockResolvedValue({ ...sample, tags: ['draft', 'redacted', 'hero'] })
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
-        const tagsBtn = wrapper.find('button[title="Click to edit tags"]')
+        const tagsBtn = wrapper.find('[data-testid="tags-edit-button"]')
         await tagsBtn.trigger('click')
         await flushPromises()
         const tagsInput = wrapper.find('input[placeholder^="tag1"]')
@@ -346,77 +406,184 @@ describe('MediaDetailDrawer', () => {
         const form = tagsInput.element.closest('form')!
         await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
         await flushPromises()
-        const [, init] = fetchMock.mock.calls[0]
-        expect(JSON.parse(init.body)).toEqual({ tags: ['draft', 'redacted', 'hero'] })
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { tags: ['draft', 'redacted', 'hero'] })
     })
 
     it('saves the prompt inline edit', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ data: { ...sample, prompt: 'updated prompt' } })
-        vi.stubGlobal('fetch', fetchMock)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+        const { hostContext, api } = buildHostContext()
+        api.patch.mockResolvedValue({ ...sample, prompt: 'updated prompt' })
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
-        const promptBtn = wrapper.find('p.cursor-pointer')
-        await promptBtn.trigger('click')
+        await wrapper.find('[data-testid="prompt-edit-button"]').trigger('click')
         await flushPromises()
         const textarea = wrapper.find('textarea')
         await textarea.setValue('updated prompt')
         const form = textarea.element.closest('form')!
         await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
         await flushPromises()
-        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ prompt: 'updated prompt' })
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { prompt: 'updated prompt' })
     })
 
-    it('confirms and deletes the asset when the user accepts', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({})
-        vi.stubGlobal('fetch', fetchMock)
-        vi.stubGlobal('confirm', () => true)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+    it('keeps the edit form open when the save returns a 500', async () => {
+        const { hostContext, api } = buildHostContext()
+        api.patch.mockRejectedValue(new Error('HTTP 500 Internal Server Error'))
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
+        await flushPromises()
+        await wrapper.find('h3.cursor-pointer').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        await input.setValue('will-fail.png')
+        const form = input.element.closest('form')!
+        await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+        await flushPromises()
+        expect(wrapper.text()).toContain('HTTP 500')
+        // Edit form must remain open so the user can retry or correct.
+        expect(wrapper.find('input[data-testid="filename-input"]').exists()).toBe(true)
+    })
+
+    it('opens the accessible delete dialog and emits delete on confirm', async () => {
+        const { hostContext, api } = buildHostContext()
+        api.delete.mockResolvedValue(undefined)
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         await wrapper.find('[data-testid="media-drawer-delete"]').trigger('click')
         await flushPromises()
-        expect(fetchMock).toHaveBeenCalledWith(`/media/${sample.id}`, expect.objectContaining({ method: 'DELETE' }))
+        const dialog = wrapper.find('[data-testid="delete-confirm-dialog"]').element as HTMLDialogElement
+        expect(dialog.open).toBe(true)
+        await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
+        await flushPromises()
+        expect(api.delete).toHaveBeenCalledWith(`/media/${sample.id}`)
         expect(wrapper.emitted('deleted')?.[0]?.[0]).toBe(sample.id)
     })
 
-    it('skips the delete when the user cancels the confirm', async () => {
-        const fetchMock = vi.fn()
-        vi.stubGlobal('fetch', fetchMock)
-        vi.stubGlobal('confirm', () => false)
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample } })
+    it('does not delete when the user cancels the confirm dialog', async () => {
+        const { hostContext, api } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         await flushPromises()
         await wrapper.find('[data-testid="media-drawer-delete"]').trigger('click')
         await flushPromises()
-        expect(fetchMock).not.toHaveBeenCalled()
+        await wrapper.find('[data-testid="delete-cancel"]').trigger('click')
+        await flushPromises()
+        expect(api.delete).not.toHaveBeenCalled()
+        expect(wrapper.emitted('deleted')).toBeUndefined()
     })
 
     it('falls back to the UUID when constructing the download name without a filename', () => {
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: null, plugin_slug: null, mime_type: 'image/png' } } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: null, plugin_slug: null, mime_type: 'image/png' }, hostContext } })
         const download = wrapper.find('a[data-testid="media-drawer-download"]')
         expect(download.attributes('download')).toBe('media-test-1.png')
     })
 
     it('uses the filename for the download attribute when set', () => {
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: 'shot.png' } } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, filename: 'shot.png' }, hostContext } })
         const download = wrapper.find('a[data-testid="media-drawer-download"]')
         expect(download.attributes('download')).toBe('shot.png')
     })
 
     it('renders the markdown extraction panel when has_markdown is true', () => {
-        // The drawer intentionally does not currently render a markdown
-        // preview when has_markdown is true (the v2 detail page does).
-        // This assertion documents the current behaviour so future
-        // changes are intentional.
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, has_markdown: true } } })
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: { ...sample, has_markdown: true }, hostContext } })
         expect(wrapper.text()).toBeTruthy()
     })
 
     it('hides the metadata fields that are null on the asset', () => {
+        const { hostContext } = buildHostContext()
         const slim: MediaAsset = { ...sample, width: null, height: null, duration_seconds: null, byte_size: null }
-        const wrapper = mount(MediaDetailDrawer, { props: { asset: slim } })
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: slim, hostContext } })
         const text = wrapper.text()
         expect(text).not.toContain('Dimensions')
         expect(text).not.toContain('Duration')
         expect(text).not.toContain('Size')
+    })
+
+    it('renders the video element with muted and playsinline', () => {
+        const { hostContext } = buildHostContext()
+        const video: MediaAsset = { ...sample, media_type: 'video', mime_type: 'video/mp4' }
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: video, hostContext } })
+        const videoEl = wrapper.find('[data-testid="media-drawer-video"]')
+        expect(videoEl.exists()).toBe(true)
+        expect(videoEl.attributes('muted')).toBeDefined()
+        expect(videoEl.attributes('playsinline')).toBeDefined()
+    })
+
+    it('renders the source link with rel="noopener noreferrer"', () => {
+        const { hostContext } = buildHostContext()
+        const withSource: MediaAsset = { ...sample, source_url: 'https://example.com/foo.png' }
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: withSource, hostContext } })
+        const link = wrapper.find('a[href="https://example.com/foo.png"]')
+        expect(link.exists()).toBe(true)
+        expect(link.attributes('rel')).toBe('noopener noreferrer')
+    })
+
+    it('refuses to render an unsafe source URL scheme', () => {
+        const { hostContext } = buildHostContext()
+        const withSource: MediaAsset = { ...sample, source_url: 'javascript:alert(1)' }
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: withSource, hostContext } })
+        expect(wrapper.find('a[href^="javascript:"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Invalid source URL')
+    })
+
+    it('marks the lightbox dialog with aria-modal', async () => {
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-preview-figure"]').trigger('click')
+        await flushPromises()
+        const lightbox = wrapper.find('[data-testid="media-lightbox"]')
+        expect(lightbox.attributes('aria-modal')).toBe('true')
+    })
+
+    it('closes the lightbox via the backdrop click', async () => {
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-preview-figure"]').trigger('click')
+        await flushPromises()
+        const lightbox = wrapper.find('[data-testid="media-lightbox"]')
+        // The dialog element is the backdrop target (click.self).
+        await lightbox.trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-lightbox"]').exists()).toBe(false)
+    })
+
+    it('announces the sharing status with role=status aria-live=polite', () => {
+        const { hostContext } = buildHostContext()
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
+        const status = wrapper.find('[data-testid="sharing-status"]')
+        expect(status.exists()).toBe(true)
+        expect(status.attributes('role')).toBe('status')
+        expect(status.attributes('aria-live')).toBe('polite')
+    })
+
+    it('disables save buttons while a save is in flight', async () => {
+        const { hostContext, api } = buildHostContext()
+        let resolvePatch: ((v: MediaAsset) => void) | null = null
+        api.patch.mockReturnValueOnce(new Promise<MediaAsset>((resolve) => {
+            resolvePatch = resolve
+        }))
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
+        await flushPromises()
+        await wrapper.find('h3.cursor-pointer').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        await input.setValue('busy.png')
+        const form = input.element.closest('form')!
+        await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+        await flushPromises()
+        // While the patch is in flight, the prompt Save button (a different
+        // field) must also be disabled — savingField is global to the drawer.
+        const promptBtn = wrapper.find('[data-testid="prompt-edit-button"]')
+        // Move to prompt edit mode so we can probe its Save button.
+        await promptBtn.trigger('click')
+        await flushPromises()
+        const promptSave = wrapper.find('[data-testid="prompt-save"]')
+        expect(promptSave.exists()).toBe(true)
+        expect(promptSave.attributes('disabled')).toBeDefined()
+        // Resolve the patch so the drawer can settle.
+        ;(resolvePatch as unknown as ((v: MediaAsset) => void) | null)?.({ ...sample, filename: 'busy.png' })
+        await flushPromises()
     })
 })
 
