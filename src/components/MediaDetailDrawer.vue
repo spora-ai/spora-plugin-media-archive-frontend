@@ -133,6 +133,16 @@ interface MutationResult {
     updated?: MediaAsset
 }
 
+function dispatchMutation(client: PluginHostContext['api'], options: MutationOptions): Promise<MediaAsset> {
+    if (options.verb === 'patch') {
+        return client.patch<MediaAsset>(options.path, options.body)
+    }
+    if (options.verb === 'post') {
+        return client.post<MediaAsset>(options.path, options.body)
+    }
+    return client.delete<MediaAsset>(options.path)
+}
+
 async function mutate(options: MutationOptions): Promise<MutationResult | null> {
     if (savingField.value !== null) return null
     savingField.value = options.field
@@ -140,12 +150,7 @@ async function mutate(options: MutationOptions): Promise<MutationResult | null> 
     try {
         const client = api.value
         const verb = options.verb
-        const request = verb === 'patch'
-            ? client.patch<MediaAsset>(options.path, options.body)
-            : verb === 'post'
-                ? client.post<MediaAsset>(options.path, options.body)
-                : client.delete<MediaAsset>(options.path)
-        const updated = await request
+        const updated = await dispatchMutation(client, options)
         if (verb === 'delete') {
             if (options.successToast) showToast(options.successToast)
             return {}
@@ -415,9 +420,9 @@ onBeforeUnmount(() => {
                         data-testid="public-sharing-toggle"
                         @change="toggleSharing"
                     />
-                    <div role="status" aria-live="polite" data-testid="sharing-status">
+                    <output aria-live="polite" data-testid="sharing-status">
                         {{ isShared ? 'Enabled' : 'Disabled' }}
-                    </div>
+                    </output>
                 </label>
             </div>
             <template v-if="isShared">
@@ -682,7 +687,6 @@ onBeforeUnmount(() => {
     <output
         v-if="toast"
         aria-live="polite"
-        role="status"
         class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg"
         data-testid="media-toast"
     >

@@ -572,12 +572,16 @@ describe('MediaDetailDrawer', () => {
         expect(wrapper.find('[data-testid="media-lightbox"]').exists()).toBe(false)
     })
 
-    it('announces the sharing status with role=status aria-live=polite', () => {
+    it('announces the sharing status via an <output> element with aria-live=polite', () => {
         const { hostContext } = buildHostContext()
         const wrapper = mount(MediaDetailDrawer, { props: { asset: sample, hostContext } })
         const status = wrapper.find('[data-testid="sharing-status"]')
         expect(status.exists()).toBe(true)
-        expect(status.attributes('role')).toBe('status')
+        expect(status.element.tagName).toBe('OUTPUT')
+        // <output> already carries the implicit `status` role; asserting it
+        // would re-introduce the redundant `role="status"` that SonarCloud
+        // flagged (Web:S6822).
+        expect(status.attributes('role')).toBeUndefined()
         expect(status.attributes('aria-live')).toBe('polite')
     })
 
