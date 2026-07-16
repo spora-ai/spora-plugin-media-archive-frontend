@@ -92,6 +92,19 @@ describe('MediaFilters', () => {
         // The active pill has the `bg-primary` class; the inactive ones don't.
         expect(audio.classes()).toContain('bg-primary')
     })
+
+    it('emits update:scope with the flipped value when the scope toggle is clicked from "mine"', async () => {
+        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'mine' } })
+        await wrapper.find('[data-testid="media-scope-mine"]').trigger('click')
+        // scope === 'mine' → emit 'all' so the toggle reads as a toggle, not a sticky switch.
+        expect(wrapper.emitted('update:scope')?.[0]?.[0]).toBe('all')
+    })
+
+    it('marks the scope toggle as active when scope is "mine"', () => {
+        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'mine' } })
+        const toggle = wrapper.find('[data-testid="media-scope-mine"]')
+        expect(toggle.classes()).toContain('bg-primary')
+    })
 })
 
 describe('MediaCard', () => {
@@ -522,6 +535,17 @@ describe('MediaDetailDrawer', () => {
         const withSource: MediaAsset = { ...sample, source_url: 'javascript:alert(1)' }
         const wrapper = mount(MediaDetailDrawer, { props: { asset: withSource, hostContext } })
         expect(wrapper.find('a[href^="javascript:"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Invalid source URL')
+    })
+
+    it('refuses to render a syntactically broken source URL', () => {
+        const { hostContext } = buildHostContext()
+        // Unclosed IPv6 bracket forces the URL constructor into its catch
+        // branch (rather than the protocol-check branch the javascript:
+        // test exercises). Both end up rendering "Invalid source URL".
+        const withSource: MediaAsset = { ...sample, source_url: 'http://[invalid' }
+        const wrapper = mount(MediaDetailDrawer, { props: { asset: withSource, hostContext } })
+        expect(wrapper.find('a[href^="http://[invalid"]').exists()).toBe(false)
         expect(wrapper.text()).toContain('Invalid source URL')
     })
 
