@@ -261,6 +261,90 @@ describe('MediaDetailPage', () => {
         expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { prompt: 'updated' })
     })
 
+    it('opens the filename edit form and saves via PATCH', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, filename: 'old.png' })
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockResolvedValue({ ...sample, filename: 'renamed.png' })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        const heading = wrapper.find('h2.cursor-pointer')
+        await heading.trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        expect(input.exists()).toBe(true)
+        await input.setValue('renamed.png')
+        const form = input.element.closest('form')!
+        await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+        await flushPromises()
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { filename: 'renamed.png' })
+    })
+
+    it('rejects an empty filename and does not issue a PATCH', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('h2.cursor-pointer').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        await input.setValue('   ')
+        const form = input.element.closest('form')!
+        await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+        await flushPromises()
+        expect(api.patch).not.toHaveBeenCalled()
+        expect(wrapper.text()).toContain('Filename cannot be empty')
+    })
+
+    it('cancels the filename edit without saving', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('h2.cursor-pointer').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        await input.setValue('never-saved.png')
+        await wrapper.find('[data-testid="filename-cancel"]').trigger('click')
+        await flushPromises()
+        expect(api.patch).not.toHaveBeenCalled()
+        expect(wrapper.find('input[data-testid="filename-input"]').exists()).toBe(false)
+    })
+
+    it('saves tags as a comma-separated array', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, tags: ['draft'] })
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockResolvedValue({ ...sample, tags: ['draft', 'redacted', 'hero'] })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="tags-edit-button"]').trigger('click')
+        await flushPromises()
+        const tagsInput = wrapper.find('input[placeholder^="tag1"]')
+        await tagsInput.setValue('draft, redacted, ,hero')
+        const form = tagsInput.element.closest('form')!
+        await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+        await flushPromises()
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { tags: ['draft', 'redacted', 'hero'] })
+    })
+
+    it('shows the tags empty placeholder when the asset has no tags', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, tags: null })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.text()).toContain('click to add tags')
+    })
+
+    it('surfaces the public-sharing toggle error in the error panel', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockRejectedValue(new Error('sharing failed'))
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="public-sharing-toggle"]').setValue(true)
+        await flushPromises()
+        expect(wrapper.text()).toContain('sharing failed')
+    })
+
     it('disables public sharing when the toggle is off', async () => {
         const get = vi.fn().mockResolvedValueOnce({ ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=old' })
         const { hostContext, api } = buildHostContext(get)
