@@ -117,6 +117,43 @@ describe('MediaCard', () => {
         expect(wrapper.find('img').exists()).toBe(false)
     })
 
+    it('falls back to the video icon for video media', () => {
+        const videoAsset: MediaAsset = { ...sample, media_type: 'video', mime_type: 'video/mp4', width: null, height: null }
+        const wrapper = mount(MediaCard, { props: { asset: videoAsset } })
+        expect(wrapper.find('img').exists()).toBe(false)
+    })
+
+    it('falls back to the generic file icon for document media', () => {
+        const docAsset: MediaAsset = { ...sample, media_type: 'document', mime_type: 'text/plain', width: null, height: null }
+        const wrapper = mount(MediaCard, { props: { asset: docAsset } })
+        expect(wrapper.find('img').exists()).toBe(false)
+    })
+
+    it('formats byte_size under 1 KiB in bytes', () => {
+        const tiny: MediaAsset = { ...sample, byte_size: 256 }
+        const wrapper = mount(MediaCard, { props: { asset: tiny } })
+        expect(wrapper.text()).toContain('256 B')
+    })
+
+    it('omits the size badge when byte_size is null', () => {
+        const nullSize: MediaAsset = { ...sample, byte_size: null }
+        const wrapper = mount(MediaCard, { props: { asset: nullSize } })
+        expect(wrapper.text()).not.toContain('KB')
+        expect(wrapper.text()).not.toContain('MB')
+    })
+
+    it('renders the tool_name when both plugin_slug and tool_name are set', () => {
+        const wrapper = mount(MediaCard, { props: { asset: sample } })
+        expect(wrapper.text()).toContain('minimax · image')
+    })
+
+    it('renders the plugin_slug without tool_name when tool_name is null', () => {
+        const noTool: MediaAsset = { ...sample, tool_name: null }
+        const wrapper = mount(MediaCard, { props: { asset: noTool } })
+        expect(wrapper.text()).toContain('minimax')
+        expect(wrapper.text()).not.toContain('·')
+    })
+
     it('uses the fallback alt text when the asset has no prompt', () => {
         const noPrompt: MediaAsset = { ...sample, prompt: null }
         const wrapper = mount(MediaCard, { props: { asset: noPrompt } })
