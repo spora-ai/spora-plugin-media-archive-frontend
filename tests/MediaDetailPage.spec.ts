@@ -190,4 +190,122 @@ describe('MediaDetailPage', () => {
         await flushPromises()
         expect(wrapper.find('[data-testid="media-page-audio"]').exists()).toBe(true)
     })
+
+    it('renders the video preview for video media', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, media_type: 'video', mime_type: 'video/mp4' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-page-video"]').exists()).toBe(true)
+    })
+
+    it('renders the dimensions row when width and height are set', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.text()).toContain('64 × 64')
+    })
+
+    it('renders the duration row when duration_seconds is set', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, duration_seconds: 12.5 })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.text()).toContain('12.50s')
+    })
+
+    it('renders the source URL row when source_url is set', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, source_url: 'https://example.com/foo.png' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        const link = wrapper.find('a[href="https://example.com/foo.png"]')
+        expect(link.exists()).toBe(true)
+        expect(link.attributes('rel')).toBe('noopener noreferrer')
+    })
+
+    it('refuses an unsafe source URL scheme', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, source_url: 'javascript:alert(1)' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.find('a[href^="javascript:"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Invalid source URL')
+    })
+
+    it('opens the tags edit form when the tags button is clicked', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, tags: ['draft', 'redacted'] })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.text()).toContain('draft, redacted')
+        await wrapper.find('[data-testid="tags-edit-button"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('input[placeholder^="tag1"]').exists()).toBe(true)
+    })
+
+    it('saves the prompt inline edit', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockResolvedValue({ ...sample, prompt: 'updated' })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="prompt-edit-button"]').trigger('click')
+        await flushPromises()
+        const textarea = wrapper.find('textarea')
+        await textarea.setValue('updated')
+        const form = textarea.element.closest('form')!
+        await form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+        await flushPromises()
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { prompt: 'updated' })
+    })
+
+    it('disables public sharing when the toggle is off', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=old' })
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockResolvedValue({ ...sample, public_url: null })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="public-sharing-toggle"]').setValue(false)
+        await flushPromises()
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { public_access_enabled: false })
+    })
+
+    it('refreshes the public-access token', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=old' })
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockResolvedValue({ ...sample, public_url: 'https://example.test/api/v1/public/media/' + sample.id + '?token=fresh' })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="refresh-public-token"]').trigger('click')
+        await flushPromises()
+        expect(api.post).toHaveBeenCalledWith(`/media/${sample.id}/public-token/refresh`, undefined)
+    })
+
+    it('copies the public URL to the clipboard when the share section is open', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined)
+        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+        const url = 'https://example.test/api/v1/public/media/' + sample.id + '?token=abc'
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, public_url: url })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="copy-public-url"]').trigger('click')
+        await flushPromises()
+        expect(writeText).toHaveBeenCalledWith(url)
+    })
+
+    it('cancels the delete dialog without issuing a DELETE', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+        await wrapper.find('[data-testid="delete-cancel"]').trigger('click')
+        await flushPromises()
+        expect(api.delete).not.toHaveBeenCalled()
+        expect(wrapper.emitted('deleted')).toBeUndefined()
+    })
 })
