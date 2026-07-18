@@ -7,7 +7,7 @@
         "php": "^8.4.1"
     },
     "dist": {
-        "url": "https://github.com/spora-ai/spora-plugin-media-archive-frontend/releases/download/v0.1.4/spora-plugin-media-archive-frontend-v0.1.4.tar.gz",
+        "url": "https://github.com/spora-ai/spora-plugin-media-archive-frontend/releases/download/v0.1.5/spora-plugin-media-archive-frontend-v0.1.5.tar.gz",
         "type": "tar"
     },
     "extra": {
