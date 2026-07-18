@@ -11,8 +11,8 @@
 const ASSET_DETAIL_PATTERN = /^\/apps\/media-archive\/asset\/([^/]+)$/
 
 export function extractAssetId(path: string): string | null {
-    const match = path.match(ASSET_DETAIL_PATTERN)
-    return match !== null && match[1] !== undefined && match[1] !== '' ? match[1] : null
+    const match = ASSET_DETAIL_PATTERN.exec(path)
+    return match?.[1] ?? null
 }
 
 export function isAssetDetailPath(path: string): boolean {
