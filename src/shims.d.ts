@@ -40,8 +40,8 @@ export interface PluginHostContext {
     }
     pinia: unknown
     theme: 'light' | 'dark'
-    route: unknown
-    router: unknown
+    route: { path: string; params: Record<string, unknown>; query: Record<string, unknown> } | null
+    router: { push: (to: string) => Promise<unknown> } | null
 }
 
 declare global {

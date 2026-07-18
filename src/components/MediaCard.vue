@@ -47,9 +47,15 @@ const sizeKb = computed(() => {
             </div>
         </div>
         <div class="flex items-start justify-between gap-2 text-xs">
-            <div class="flex flex-col">
-                <span class="truncate font-medium text-foreground">
-                    {{ asset.plugin_slug ?? 'unknown' }}<span v-if="asset.tool_name"> · {{ asset.tool_name }}</span>
+            <div class="flex min-w-0 flex-col">
+                <span class="truncate font-medium text-foreground" data-testid="media-card-filename">
+                    {{ asset.filename ?? asset.id }}
+                </span>
+                <span
+                    v-if="asset.plugin_slug"
+                    class="truncate text-muted-foreground"
+                >
+                    {{ asset.plugin_slug }}<span v-if="asset.tool_name"> · {{ asset.tool_name }}</span>
                 </span>
                 <span class="truncate text-muted-foreground">{{ createdAt }}</span>
             </div>

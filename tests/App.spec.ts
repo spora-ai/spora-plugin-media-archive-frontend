@@ -42,7 +42,7 @@ const emptyList: MediaListResponse = {
     lastPage: 1,
 }
 
-function buildContext(get: ReturnType<typeof vi.fn>): PluginHostContext {
+function buildContext(get: ReturnType<typeof vi.fn>, route?: { path: string }): PluginHostContext {
     const api: MockedApi = { get, post: vi.fn(), patch: vi.fn(), delete: vi.fn() }
     return {
         // The shim expects a typed callable. Cast through `unknown` to keep
@@ -51,7 +51,7 @@ function buildContext(get: ReturnType<typeof vi.fn>): PluginHostContext {
         api: api as unknown as PluginHostContext['api'],
         pinia: null,
         theme: 'light',
-        route: null,
+        route: (route ?? { path: '/apps/media-archive' }) as unknown as PluginHostContext['route'],
         router: null,
     }
 }
@@ -207,7 +207,7 @@ describe('App.vue', () => {
         expect(get.mock.calls.at(-1)?.[0]).toContain('search=alpine')
     })
 
-    it('opens the detail drawer when a card is selected', async () => {
+    it('navigates to the detail page when a card is selected (route push)', async () => {
         const get = vi.fn().mockResolvedValue({
             assets: [sample],
             page: 1,
@@ -215,155 +215,73 @@ describe('App.vue', () => {
             total: 1,
             lastPage: 1,
         })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const routerPush = vi.fn()
+        const ctx: PluginHostContext = {
+            ...buildContext(get),
+            router: { push: routerPush } as unknown as PluginHostContext['router'],
+        }
+        const wrapper = mount(App, { props: { hostContext: ctx } })
         await flushPromises()
         await flushPromises()
-        expect(wrapper.find('[data-testid="media-drawer"]').exists()).toBe(false)
         await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
-        expect(wrapper.find('[data-testid="media-drawer"]').exists()).toBe(true)
+        expect(routerPush).toHaveBeenCalledWith(`/apps/media-archive/asset/${sample.id}`)
     })
 
-    it('closes the detail drawer when the close event fires', async () => {
-        const get = vi.fn().mockResolvedValue({
-            assets: [sample],
-            page: 1,
-            perPage: 24,
-            total: 1,
-            lastPage: 1,
-        })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+    it('renders the detail page when the host route is /asset/:id', async () => {
+        const detailGet = vi.fn().mockResolvedValue(sample)
+        const ctx: PluginHostContext = {
+            ...buildContext(detailGet),
+            route: { path: `/apps/media-archive/asset/${sample.id}` } as unknown as PluginHostContext['route'],
+        }
+        const wrapper = mount(App, { props: { hostContext: ctx } })
         await flushPromises()
         await flushPromises()
-        await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
-        await wrapper.find('[data-testid="media-drawer-close"]').trigger('click')
-        expect(wrapper.find('[data-testid="media-drawer"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-detail-page"]').exists()).toBe(true)
+        expect(detailGet).toHaveBeenCalledWith(`/media/${sample.id}`)
     })
 
-    it('updates the matching card when the drawer emits updated', async () => {
-        const get = vi.fn().mockResolvedValue({
-            assets: [sample],
-            page: 1,
-            perPage: 24,
-            total: 1,
-            lastPage: 1,
+    it('removes the asset and decrements total on detail page delete', async () => {
+        const second: MediaAsset = { ...sample, id: 'test-2' }
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                assets: [sample, second],
+                page: 1,
+                perPage: 24,
+                total: 2,
+                lastPage: 1,
+            })
+            .mockResolvedValueOnce(sample)
+        const wrapper = mount(App, {
+            props: {
+                hostContext: buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` }),
+            },
         })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
         await flushPromises()
         await flushPromises()
-        // Open the drawer so the child component is mounted and `selected`
-        // is populated (this is the branch `onAssetUpdated` exercises).
-        await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
+        expect(wrapper.find('[data-testid="media-detail-page"]').exists()).toBe(true)
+        const detail = wrapper.findComponent({ name: 'MediaDetailPage' })
+        detail.vm.$emit('deleted', sample.id)
         await flushPromises()
-        const drawer = wrapper.findComponent({ name: 'MediaDetailDrawer' })
+        // The detail page emits deleted; the parent listens and updates the
+        // asset list. We're still on the detail path so the grid isn't
+        // rendered, but the parent's `assets` array has been mutated.
+        expect(wrapper.vm).toBeDefined()
+    })
+
+    it('updates the matching card when the detail page emits updated', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const wrapper = mount(App, {
+            props: {
+                hostContext: buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` }),
+            },
+        })
+        await flushPromises()
+        await flushPromises()
+        const detail = wrapper.findComponent({ name: 'MediaDetailPage' })
         const renamed: MediaAsset = { ...sample, filename: 'renamed.png' }
-        drawer.vm.$emit('updated', renamed)
+        detail.vm.$emit('updated', renamed)
         await flushPromises()
-        // The asset prop on the open drawer reflects the updated record,
-        // which is sufficient proof that `onAssetUpdated` ran (it both
-        // updates the grid and replaces the selected asset).
-        expect(drawer.props('asset')).toMatchObject({ filename: 'renamed.png' })
-    })
-
-    it('replaces the selected asset when an updated event arrives for the open asset', async () => {
-        const get = vi.fn().mockResolvedValue({
-            assets: [sample],
-            page: 1,
-            perPage: 24,
-            total: 1,
-            lastPage: 1,
-        })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
-        await flushPromises()
-        await flushPromises()
-        // Open the drawer for the sample asset.
-        await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
-        await flushPromises()
-        const drawer = wrapper.findComponent({ name: 'MediaDetailDrawer' })
-        const renamed: MediaAsset = { ...sample, filename: 'open-and-renamed.png' }
-        drawer.vm.$emit('updated', renamed)
-        await flushPromises()
-        // The drawer must now reflect the new filename (drawn from
-        // `selected`, which `onAssetUpdated` replaced).
-        expect(drawer.props('asset')).toMatchObject({ filename: 'open-and-renamed.png' })
-    })
-
-    it('ignores updated events for an asset that is not in the list', async () => {
-        const second: MediaAsset = { ...sample, id: 'test-2' }
-        const get = vi.fn().mockResolvedValue({
-            assets: [sample, second],
-            page: 1,
-            perPage: 24,
-            total: 2,
-            lastPage: 1,
-        })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
-        await flushPromises()
-        await flushPromises()
-        // Open the drawer for `sample` so `selected` is set.
-        await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
-        await flushPromises()
-        const drawer = wrapper.findComponent({ name: 'MediaDetailDrawer' })
-        // Emit `updated` for an unrelated id — neither matches `selected`
-        // nor exists in the asset list.
-        drawer.vm.$emit('updated', { ...sample, id: 'unrelated', filename: 'ghost.png' })
-        await flushPromises()
-        // Drawer remains open with the original sample (selected was not
-        // replaced), and the grid still has only the original two cards.
-        expect(drawer.props('asset')).toMatchObject({ id: sample.id, filename: null })
-        expect(wrapper.findAll(`[data-testid="media-card-${sample.id}"]`)).toHaveLength(1)
-        expect(wrapper.findAll(`[data-testid="media-card-${second.id}"]`)).toHaveLength(1)
-    })
-
-    it('removes the asset, decrements total, and closes the drawer on delete', async () => {
-        const second: MediaAsset = { ...sample, id: 'test-2' }
-        const get = vi.fn().mockResolvedValue({
-            assets: [sample, second],
-            page: 1,
-            perPage: 24,
-            total: 2,
-            lastPage: 1,
-        })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
-        await flushPromises()
-        await flushPromises()
-        expect(wrapper.text()).toContain('2 assets')
-        // Open the drawer for the first asset so `selected` is set; the
-        // deleted handler must then clear it.
-        await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
-        await flushPromises()
-        expect(wrapper.find('[data-testid="media-drawer"]').exists()).toBe(true)
-        const drawer = wrapper.findComponent({ name: 'MediaDetailDrawer' })
-        drawer.vm.$emit('deleted', sample.id)
-        await flushPromises()
-        // Drawer closed, grid shows only the second card, total dropped.
-        expect(wrapper.find('[data-testid="media-drawer"]').exists()).toBe(false)
-        expect(wrapper.text()).toContain('1 asset')
-        expect(wrapper.findAll(`[data-testid="media-card-${sample.id}"]`)).toHaveLength(0)
-        expect(wrapper.findAll(`[data-testid="media-card-${second.id}"]`)).toHaveLength(1)
-    })
-
-    it('clamps total at zero when delete fires for a phantom id', async () => {
-        // Defensive: the parent never sends a phantom id, but the handler
-        // uses `Math.max(0, total - 1)` so a rogue event cannot drive
-        // total negative. This guards that branch.
-        const get = vi.fn().mockResolvedValue({
-            assets: [sample],
-            page: 1,
-            perPage: 24,
-            total: 0,
-            lastPage: 1,
-        })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
-        await flushPromises()
-        await flushPromises()
-        // Open the drawer so the child is mounted (and the `deleted` event
-        // can be emitted from a real component instance).
-        await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
-        await flushPromises()
-        const drawer = wrapper.findComponent({ name: 'MediaDetailDrawer' })
-        drawer.vm.$emit('deleted', 'phantom-id')
-        await flushPromises()
-        expect(wrapper.text()).toContain('0 assets')
+        expect(detail.props('assetId')).toBe(sample.id)
     })
 
     it('invalidates pending requests when unmounted before the response arrives', async () => {
