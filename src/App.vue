@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Image, FileAudio, FileVideo, FileText, Search } from 'lucide-vue-next'
 import type { PluginHostContext } from './shims'
 import type { MediaAsset, MediaListQuery, MediaListResponse, MediaType } from './types'
+import { extractAssetId } from './lib/route-detection'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaFilters from './components/MediaFilters.vue'
-import MediaDetailDrawer from './components/MediaDetailDrawer.vue'
+import MediaDetailPage from './pages/MediaDetailPage.vue'
 
 import './style.css'
 
 const props = defineProps<{ hostContext: PluginHostContext }>()
 
 const api = computed(() => props.hostContext.api)
+const routePath = computed(() => props.hostContext.route?.path ?? '/apps/media-archive')
 const assets = ref<MediaAsset[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -24,7 +26,16 @@ const query = ref<MediaListQuery>({
 })
 const scope = ref<'all' | 'mine'>('all')
 const total = ref(0)
-const selected = ref<MediaAsset | null>(null)
+
+/**
+ * The plugin is mounted as a leaf under `/apps/media-archive`; the host
+ * router does not register a child route for `asset/:id`. We read the
+ * current path reactively and toggle between grid and detail. Browser
+ * back/forward, hard refresh, and URL sharing all work because the URL
+ * is the source of truth — see `lib/route-detection.ts`.
+ */
+const activeAssetId = computed(() => extractAssetId(routePath.value))
+const isOnDetailPage = computed(() => activeAssetId.value !== null)
 
 /**
  * Monotonic `requestId` guard against stale responses from rapid filter
@@ -79,18 +90,19 @@ function setScope(next: 'all' | 'mine'): void {
     void load()
 }
 
+/**
+ * Card click: push the URL to the asset detail route. The host router
+ * does not need to know about this sub-route — see
+ * `lib/route-detection.ts` for the path-based detection.
+ */
 function select(asset: MediaAsset): void {
-    selected.value = asset
-}
-
-function closeDrawer(): void {
-    selected.value = null
+    const router = props.hostContext.router
+    if (router !== null) {
+        void router.push(`/apps/media-archive/asset/${asset.id}`)
+    }
 }
 
 function onAssetUpdated(updated: MediaAsset): void {
-    if (selected.value?.id === updated.id) {
-        selected.value = updated
-    }
     const idx = assets.value.findIndex((a) => a.id === updated.id)
     if (idx >= 0) {
         assets.value = assets.value.map((a) => (a.id === updated.id ? updated : a))
@@ -100,10 +112,20 @@ function onAssetUpdated(updated: MediaAsset): void {
 function onAssetDeleted(id: string): void {
     assets.value = assets.value.filter((a) => a.id !== id)
     total.value = Math.max(0, total.value - 1)
-    selected.value = null
 }
 
-onMounted(load)
+onMounted(() => {
+    if (!isOnDetailPage.value) {
+        void load()
+    }
+})
+
+// Refresh the grid whenever the user navigates back from a detail page.
+watch(activeAssetId, (id) => {
+    if (id === null) {
+        void load()
+    }
+})
 
 onBeforeUnmount(() => {
     // Bumping the id invalidates any pending response.
@@ -112,7 +134,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="flex flex-col gap-6 text-foreground">
+    <MediaDetailPage
+        v-if="isOnDetailPage && activeAssetId !== null"
+        :asset-id="activeAssetId"
+        :host-context="hostContext"
+        @updated="onAssetUpdated"
+        @deleted="onAssetDeleted"
+    />
+    <div v-else class="flex flex-col gap-6 text-foreground" data-testid="media-archive-grid-view">
         <header class="flex flex-col gap-2">
             <h2 class="text-lg font-semibold">Media Archive</h2>
             <p class="text-sm text-muted-foreground">
@@ -134,15 +163,6 @@ onBeforeUnmount(() => {
             Failed to load media: {{ error }}
         </div>
         <MediaGrid v-else :assets="assets" @select="select" />
-
-        <MediaDetailDrawer
-            v-if="selected"
-            :asset="selected"
-            :host-context="hostContext"
-            @close="closeDrawer"
-            @updated="onAssetUpdated"
-            @deleted="onAssetDeleted"
-        />
 
         <div class="hidden">
             <Image class="h-4 w-4" />
