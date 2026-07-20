@@ -29,7 +29,10 @@ const hostContext: PluginHostContext = {
     pinia: createPinia(),
     theme: 'light',
     route: { path: '/apps/media-archive', params: {}, query: {} },
-    router: { push: async () => undefined },
+    router: {
+        push: async () => undefined,
+        currentRoute: { value: { path: '/apps/media-archive' } },
+    },
 }
 
 const target = document.getElementById('app')

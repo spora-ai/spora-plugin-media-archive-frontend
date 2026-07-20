@@ -13,7 +13,19 @@ import './style.css'
 const props = defineProps<{ hostContext: PluginHostContext }>()
 
 const api = computed(() => props.hostContext.api)
-const routePath = computed(() => props.hostContext.route?.path ?? '/apps/media-archive')
+// Listen to host navigations imperatively via `router.afterEach`. The
+// alternative — reading `router.currentRoute.value` reactively in a
+// `watch` — fails because the plugin and the host ship separate `vue`
+// packages: when Vue wraps `hostContext` in `reactive()` for the
+// plugin's props, the host's `shallowRef` ends up behind a reactive
+// proxy whose `.value` getter doesn't subscribe to the ref's
+// internal dep list. `afterEach` is an imperative callback fired from
+// Vue Router's own nav pipeline, so it sidesteps reactivity entirely.
+// The `currentRoute.value.path` read for the initial value works
+// because it only reads once at mount.
+const routePath = ref<string>(
+    props.hostContext.router?.currentRoute?.value?.path ?? '/apps/media-archive',
+)
 const assets = ref<MediaAsset[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -112,11 +124,29 @@ function onAssetUpdated(updated: MediaAsset): void {
 function onAssetDeleted(id: string): void {
     assets.value = assets.value.filter((a) => a.id !== id)
     total.value = Math.max(0, total.value - 1)
+    // After deletion the URL still points at the now-gone asset; the
+    // detail page would render a 404 from the API. Only redirect when
+    // we're actually on a detail URL — deletion can also fire from a
+    // future "delete from grid" affordance where redirecting would be
+    // a no-op.
+    if (isOnDetailPage.value) {
+        void props.hostContext.router?.push('/apps/media-archive')
+    }
 }
+
+let unregisterAfterEach: (() => void) | null = null
 
 onMounted(() => {
     if (!isOnDetailPage.value) {
         void load()
+    }
+    const router = props.hostContext.router as unknown as
+        | { afterEach: (cb: (to: { path: string }) => void) => () => void }
+        | null
+    if (router !== null && typeof router.afterEach === 'function') {
+        unregisterAfterEach = router.afterEach((to) => {
+            routePath.value = to.path
+        })
     }
 })
 
@@ -128,6 +158,7 @@ watch(activeAssetId, (id) => {
 })
 
 onBeforeUnmount(() => {
+    unregisterAfterEach?.()
     // Bumping the id invalidates any pending response.
     requestId++
 })
