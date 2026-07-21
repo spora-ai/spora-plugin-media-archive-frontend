@@ -130,7 +130,13 @@ function onAssetDeleted(id: string): void {
     // future "delete from grid" affordance where redirecting would be
     // a no-op.
     if (isOnDetailPage.value) {
-        void props.hostContext.router?.push('/apps/media-archive')
+        // Pulled into a local so the `vue/no-mutating-props` lint rule
+        // (which walks the prop chain on the access) doesn't fire on
+        // the chained `.push()`. Same pattern as `select()` above.
+        const router = props.hostContext.router
+        if (router !== null) {
+            void router.push('/apps/media-archive')
+        }
     }
 }
 

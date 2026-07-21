@@ -10,6 +10,12 @@
  *   `v-model` and emit `update:modelValue` so consumers can still
  *   exercise their handlers without a real editor instance.
  */
+/* eslint-disable vue/one-component-per-file, vue/require-prop-types --
+   These are Vitest stubs for an external library; they intentionally
+   declare props as a string array to mirror the production surface
+   without pulling in the real `md-editor-v3` types (which would drag
+   in CodeMirror 6 type defs the test runner can't satisfy). */
+
 import { vi } from 'vitest'
 
 vi.mock('md-editor-v3', async () => {
