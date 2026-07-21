@@ -10,3 +10,5 @@
 /frontend/main.js
 /frontend/style.css
 /.worktrees/
+/vendor/
+/composer.lock
