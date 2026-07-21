@@ -13,6 +13,36 @@ import {
 } from 'lucide-vue-next'
 import type { MediaAsset } from '../types'
 import type { PluginHostContext } from '../shims'
+import { MdEditor, MdPreview, type ToolbarNames } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
+
+/**
+ * Toolbar buttons rendered on the markdown editor. Mirrors the host SPA's
+ * `MarkdownEditor.vue` `full` mode so operators get the same muscle memory
+ * across the chat composer and this detail page. Deliberately omits
+ * `github` (third-party branding in the toolbar), `mermaid` (we don't ship
+ * diagrams in extracted docs), and `formula` (we don't ship LaTeX in
+ * extracted docs).
+ */
+const markdownEditorToolbars: ToolbarNames[] = [
+    'bold', 'underline', 'italic', 'strikeThrough',
+    '-',
+    'title', 'sub', 'sup', 'quote',
+    '-',
+    'unorderedList', 'orderedList', 'task',
+    '-',
+    'code', 'codeRow', 'link', 'image', 'table',
+    '-',
+    'preview',
+    'pageFullscreen',
+]
+
+/**
+ * Locale for the editor + preview UI. `md-editor-v3` ships Chinese as the
+ * default; pin to en-US so the toolbar labels and screen-reader text are
+ * consistent with the rest of the admin UI.
+ */
+const MARKDOWN_LOCALE = 'en-US'
 
 const props = defineProps<{
     assetId: string
@@ -209,7 +239,7 @@ async function refreshShareToken(): Promise<void> {
     }
 }
 
-async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
+async function saveField(field: 'filename' | 'prompt' | 'tags' | 'markdown'): Promise<void> {
     if (asset.value === null) return
     let body: Record<string, unknown>
     if (field === 'filename') {
@@ -226,6 +256,11 @@ async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
                 .map((t) => t.trim())
                 .filter((t) => t !== ''),
         }
+    } else if (field === 'markdown') {
+        // `editValue` tracks the editor buffer; persist verbatim. Empty string
+        // clears the field on the server — useful for re-running the
+        // extraction pipeline manually later.
+        body = { markdown_content: editValue.value }
     } else {
         body = { prompt: editValue.value }
     }
@@ -621,6 +656,89 @@ onBeforeUnmount(() => {
                             :disabled="savingField !== null"
                             class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
                             data-testid="prompt-save"
+                        >
+                            Save
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Markdown -->
+            <section>
+                <div class="mb-2 flex items-center justify-between">
+                    <h3 class="text-sm font-semibold">Markdown</h3>
+                    <div
+                        v-if="editingField !== 'markdown' && asset.markdown_content !== null"
+                        class="flex items-center gap-2"
+                    >
+                        <button
+                            type="button"
+                            class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
+                            data-testid="markdown-edit-button"
+                            @click="startEditing('markdown', asset.markdown_content)"
+                        >
+                            Edit
+                        </button>
+                    </div>
+                </div>
+                <div
+                    v-if="editingField !== 'markdown' && asset.markdown_content !== null"
+                    class="rounded-md border border-border bg-background p-3 max-h-96 overflow-auto"
+                    data-testid="markdown-preview-wrapper"
+                >
+                    <MdPreview
+                        :model-value="asset.markdown_content"
+                        :language="MARKDOWN_LOCALE"
+                        class="bg-transparent"
+                        data-testid="markdown-preview"
+                    />
+                </div>
+                <p
+                    v-else-if="editingField !== 'markdown'"
+                    class="rounded-md bg-muted/60 p-3 text-sm italic text-muted-foreground"
+                    data-testid="markdown-empty"
+                >
+                    No extracted markdown yet.
+                    <button
+                        type="button"
+                        class="ml-2 not-italic text-primary underline-offset-2 hover:underline"
+                        data-testid="markdown-add-button"
+                        @click="startEditing('markdown', '')"
+                    >
+                        Add markdown
+                    </button>
+                </p>
+                <form
+                    v-else
+                    class="flex flex-col gap-2"
+                    data-testid="markdown-edit-form"
+                    @submit.prevent="saveField('markdown')"
+                >
+                    <label for="media-markdown-input" class="sr-only">Markdown content</label>
+                    <MdEditor
+                        id="media-markdown-input"
+                        :model-value="editValue"
+                        :rows="12"
+                        :preview="true"
+                        :language="MARKDOWN_LOCALE"
+                        :toolbars="markdownEditorToolbars"
+                        data-testid="markdown-editor"
+                        @update:model-value="editValue = $event"
+                    />
+                    <div class="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            class="rounded px-3 py-1 text-xs text-muted-foreground"
+                            data-testid="markdown-cancel"
+                            @click="cancelEdit"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            :disabled="savingField !== null"
+                            class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                            data-testid="markdown-save"
                         >
                             Save
                         </button>

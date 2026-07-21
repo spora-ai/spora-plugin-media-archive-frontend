@@ -41,7 +41,17 @@ export interface PluginHostContext {
     pinia: unknown
     theme: 'light' | 'dark'
     route: { path: string; params: Record<string, unknown>; query: Record<string, unknown> } | null
-    router: { push: (to: string) => Promise<unknown> } | null
+    /**
+     * Host's Vue Router instance. Plugins read `currentRoute` (a
+     * `shallowRef`) for reactive URL tracking, and call `push(to)` for
+     * client-side navigation. The host already exposes the full Router
+     * — see `spora-frontend/src/apps/registry.ts → PluginHostContext`
+     * — but plugins only see the surface they actually use.
+     */
+    router: {
+        push: (to: string) => Promise<unknown>
+        currentRoute: { value: { path: string; params?: Record<string, unknown>; query?: Record<string, unknown> } }
+    } | null
 }
 
 declare global {

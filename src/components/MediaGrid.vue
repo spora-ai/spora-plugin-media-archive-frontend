@@ -2,13 +2,15 @@
 import MediaCard from './MediaCard.vue'
 import type { MediaAsset } from '../types'
 
-defineProps<{ assets: MediaAsset[] }>()
+const props = withDefaults(defineProps<{ assets?: MediaAsset[] | null }>(), {
+    assets: () => [],
+})
 const emit = defineEmits<{ (event: 'select', asset: MediaAsset): void }>()
 </script>
 
 <template>
     <div
-        v-if="assets.length === 0"
+        v-if="(props.assets ?? []).length === 0"
         class="rounded-xl border border-dashed border-border bg-card/50 p-12 text-center text-sm text-muted-foreground"
         data-testid="media-grid-empty"
     >
@@ -20,7 +22,7 @@ const emit = defineEmits<{ (event: 'select', asset: MediaAsset): void }>()
         data-testid="media-grid"
     >
         <MediaCard
-            v-for="asset in assets"
+            v-for="asset in props.assets ?? []"
             :key="asset.id"
             :asset="asset"
             @click="emit('select', asset)"

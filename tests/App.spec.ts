@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { ref } from 'vue'
 import App from '../src/App.vue'
 import type { MediaAsset, MediaListResponse } from '../src/types'
 import type { PluginHostContext } from '../src/shims'
@@ -22,6 +23,7 @@ const sample: MediaAsset = {
     duration_seconds: null,
     prompt: 'a tiny pixel',
     filename: null,
+    markdown_content: null,
     tags: null,
     asset_url: 'data:image/png;base64,AAAA',
     source_url: null,
@@ -44,6 +46,31 @@ const emptyList: MediaListResponse = {
 
 function buildContext(get: ReturnType<typeof vi.fn>, route?: { path: string }): PluginHostContext {
     const api: MockedApi = { get, post: vi.fn(), patch: vi.fn(), delete: vi.fn() }
+    // The plugin reads `hostContext.router.currentRoute.value.path` (a
+    // `shallowRef`). Stub it with a plain `ref` whose value can be
+    // reassigned in tests to simulate host navigation.
+    const initialPath = (route ?? { path: '/apps/media-archive' }).path
+    const currentRoute = ref({ path: initialPath })
+    const afterEachCbs: Array<(to: { path: string }) => void> = []
+    const router = {
+        // `select()` and `goBack()` call `router.push(to)`. Mirror
+        // Vue Router's behavior: update `currentRoute.value` and
+        // fire any `afterEach` hooks.
+        push: (to: string) => {
+            const path = typeof to === 'string' ? to : (to as { path: string }).path
+            currentRoute.value = { path }
+            for (const cb of afterEachCbs) cb({ path })
+            return Promise.resolve()
+        },
+        currentRoute,
+        afterEach: (cb: (to: { path: string }) => void) => {
+            afterEachCbs.push(cb)
+            return () => {
+                const i = afterEachCbs.indexOf(cb)
+                if (i >= 0) afterEachCbs.splice(i, 1)
+            }
+        },
+    }
     return {
         // The shim expects a typed callable. Cast through `unknown` to keep
         // the test ergonomics (no need to re-declare the generic at every
@@ -51,8 +78,8 @@ function buildContext(get: ReturnType<typeof vi.fn>, route?: { path: string }): 
         api: api as unknown as PluginHostContext['api'],
         pinia: null,
         theme: 'light',
-        route: (route ?? { path: '/apps/media-archive' }) as unknown as PluginHostContext['route'],
-        router: null,
+        route: { path: initialPath, params: {}, query: {} } as unknown as PluginHostContext['route'],
+        router: router as unknown as PluginHostContext['router'],
     }
 }
 
@@ -74,7 +101,7 @@ describe('App.vue', () => {
             lastPage: 1,
         }
         const get = vi.fn().mockResolvedValueOnce(list)
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
         expect(wrapper.text()).toContain('Media Archive')
@@ -92,7 +119,7 @@ describe('App.vue', () => {
             total: 1,
             lastPage: 1,
         })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
         expect(wrapper.text()).toContain('1 asset')
@@ -107,7 +134,7 @@ describe('App.vue', () => {
             total: 10,
             lastPage: 1,
         })
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
         expect(wrapper.text()).toContain('10 assets')
@@ -115,7 +142,7 @@ describe('App.vue', () => {
 
     it('passes scope=mine to the API when the scope toggle is flipped', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
         expect(get).toHaveBeenCalledTimes(1)
@@ -139,7 +166,7 @@ describe('App.vue', () => {
         const get = vi.fn()
             .mockReturnValueOnce(slowPromise)
             .mockResolvedValueOnce(fastResult)
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         // Allow the initial (slow) call to settle as pending.
         await flushPromises()
         // Trigger a filter change — this should swap to the fast call.
@@ -157,7 +184,7 @@ describe('App.vue', () => {
 
     it('surfaces the error when /media fails', async () => {
         const get = vi.fn().mockRejectedValueOnce(new Error('Boom'))
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
         expect(wrapper.text()).toContain('Failed to load media')
@@ -171,7 +198,7 @@ describe('App.vue', () => {
                 resolveFn = resolve
             }),
         )
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         expect(wrapper.text()).toContain('Loading media')
         // `resolveFn` is captured inside the Promise executor; the strict
@@ -184,7 +211,7 @@ describe('App.vue', () => {
 
     it('passes the active filter to the API when the user changes type', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
         expect(get).toHaveBeenCalledTimes(1)
@@ -198,7 +225,7 @@ describe('App.vue', () => {
 
     it('passes the search term to the API as the user types', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
         await wrapper.find('[data-testid="media-search"]').setValue('alpine')
@@ -215,24 +242,20 @@ describe('App.vue', () => {
             total: 1,
             lastPage: 1,
         })
-        const routerPush = vi.fn()
-        const ctx: PluginHostContext = {
-            ...buildContext(get),
-            router: { push: routerPush } as unknown as PluginHostContext['router'],
-        }
+        const ctx = buildContext(get)
         const wrapper = mount(App, { props: { hostContext: ctx } })
         await flushPromises()
         await flushPromises()
         await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
-        expect(routerPush).toHaveBeenCalledWith(`/apps/media-archive/asset/${sample.id}`)
+        await flushPromises()
+        expect(ctx.router!.currentRoute.value.path).toBe(`/apps/media-archive/asset/${sample.id}`)
     })
 
     it('renders the detail page when the host route is /asset/:id', async () => {
         const detailGet = vi.fn().mockResolvedValue(sample)
-        const ctx: PluginHostContext = {
-            ...buildContext(detailGet),
-            route: { path: `/apps/media-archive/asset/${sample.id}` } as unknown as PluginHostContext['route'],
-        }
+        const ctx = buildContext(detailGet)
+        ctx.router!.push(`/apps/media-archive/asset/${sample.id}`)
+        await flushPromises()
         const wrapper = mount(App, { props: { hostContext: ctx } })
         await flushPromises()
         await flushPromises()
@@ -243,6 +266,10 @@ describe('App.vue', () => {
     it('removes the asset and decrements total on detail page delete', async () => {
         const second: MediaAsset = { ...sample, id: 'test-2' }
         const get = vi.fn()
+            // Initial grid load (the test mounts at /asset/<id> but App.vue
+            // still issues the list call before the route watcher kicks
+            // in — the mock only matters if the test ever drives a
+            // back-navigation before the watcher fires).
             .mockResolvedValueOnce({
                 assets: [sample, second],
                 page: 1,
@@ -250,11 +277,25 @@ describe('App.vue', () => {
                 total: 2,
                 lastPage: 1,
             })
+            // Detail page load for the current asset.
             .mockResolvedValueOnce(sample)
+            // Post-delete grid reload: the delete handler pushes back to
+            // /apps/media-archive which fires the activeAssetId watcher
+            // and reissues /media — without this third return the mock
+            // resolves undefined, MediaGrid reads .length on undefined,
+            // and the unhandled rejection fails CI even though no
+            // assertion fails.
+            .mockResolvedValueOnce({
+                assets: [second],
+                page: 1,
+                perPage: 24,
+                total: 1,
+                lastPage: 1,
+            })
+        const helper = buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` })
         const wrapper = mount(App, {
-            props: {
-                hostContext: buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` }),
-            },
+            props: { hostContext: helper },
+
         })
         await flushPromises()
         await flushPromises()
@@ -262,18 +303,17 @@ describe('App.vue', () => {
         const detail = wrapper.findComponent({ name: 'MediaDetailPage' })
         detail.vm.$emit('deleted', sample.id)
         await flushPromises()
-        // The detail page emits deleted; the parent listens and updates the
-        // asset list. We're still on the detail path so the grid isn't
-        // rendered, but the parent's `assets` array has been mutated.
-        expect(wrapper.vm).toBeDefined()
+        // The URL must bounce back to the grid so the user isn't stuck on
+        // a detail page pointing at the now-deleted asset.
+        expect(helper.router!.currentRoute.value.path).toBe('/apps/media-archive')
     })
 
     it('updates the matching card when the detail page emits updated', async () => {
         const get = vi.fn().mockResolvedValueOnce(sample)
+        const helper = buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` })
         const wrapper = mount(App, {
-            props: {
-                hostContext: buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` }),
-            },
+            props: { hostContext: helper },
+            
         })
         await flushPromises()
         await flushPromises()
@@ -292,7 +332,7 @@ describe('App.vue', () => {
                 resolveFn = resolve
             }),
         )
-        const wrapper = mount(App, { props: { hostContext: buildContext(get) } })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         // Unmount while the initial request is still pending.
         wrapper.unmount()
@@ -309,5 +349,26 @@ describe('App.vue', () => {
         })
         await flushPromises()
         expect(get).toHaveBeenCalledTimes(1)
+    })
+
+    it('re-renders when the host navigates within the plugin mount', async () => {
+        // Regression for the in-app detail URL: clicking a card pushes
+        // /apps/media-archive/asset/<id>; the grid must give way to the
+        // detail page without a remount.
+        const get = vi.fn()
+            .mockResolvedValueOnce({ assets: [sample], page: 1, perPage: 24, total: 1, lastPage: 1 })
+            .mockResolvedValueOnce(sample)
+        const ctx = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: ctx } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-archive-grid-view"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-detail-page"]').exists()).toBe(false)
+
+        ctx.router!.push(`/apps/media-archive/asset/${sample.id}`)
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-archive-grid-view"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-detail-page"]').exists()).toBe(true)
     })
 })

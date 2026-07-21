@@ -94,6 +94,12 @@ export default defineConfig({
     test: {
         environment: 'happy-dom',
         globals: true,
+        // Pull in the `md-editor-v3` stub before any component imports it.
+        // The real library mounts CodeMirror 6 + tries to fetch highlight.js
+        // / katex / mermaid CSS from unpkg.com — neither works under
+        // happy-dom, so we replace it with a tiny textarea + div in
+        // `tests/setup.ts`.
+        setupFiles: ['./tests/setup.ts'],
         // Emit `coverage/lcov.info` so SonarCloud can read it. The v8
         // provider only writes coverage-final.json + clover.xml by default;
         // we explicitly add `lcov` here to satisfy the SonarSource action's
