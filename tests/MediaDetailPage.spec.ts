@@ -39,6 +39,7 @@ const sample: MediaAsset = {
     duration_seconds: null,
     prompt: 'a tiny pixel',
     filename: null,
+    markdown_content: null,
     tags: null,
     asset_url: 'data:image/png;base64,AAAA',
     source_url: null,
@@ -392,4 +393,79 @@ describe('MediaDetailPage', () => {
         expect(api.delete).not.toHaveBeenCalled()
         expect(wrapper.emitted('deleted')).toBeUndefined()
     })
+
+    it('renders the markdown preview when markdown_content is set', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Hello\n\nWorld' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        const preview = wrapper.find('[data-testid="markdown-preview-wrapper"]')
+        expect(preview.exists()).toBe(true)
+        expect(preview.text()).toContain('Hello')
+    })
+
+    it('shows the markdown empty placeholder when markdown_content is null', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: null })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="markdown-empty"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="markdown-preview-wrapper"]').exists()).toBe(false)
+    })
+
+    it('opens the markdown editor when the Edit button is clicked', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Hi' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="markdown-edit-button"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(true)
+    })
+
+    it('opens the markdown editor with an empty buffer when Add markdown is clicked', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: null })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="markdown-add-button"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(true)
+    })
+
+    it('saves the markdown content via PATCH', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Old' })
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockResolvedValue({ ...sample, markdown_content: '# New\n\nUpdated body' })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="markdown-edit-button"]').trigger('click')
+        await flushPromises()
+        // The stub editor is a textarea — type into it.
+        const editor = wrapper.find('[data-testid="markdown-editor"]')
+        await editor.setValue('# New\n\nUpdated body')
+        await flushPromises()
+        const form = wrapper.find('[data-testid="markdown-edit-form"]')
+        await form.trigger('submit.prevent')
+        await flushPromises()
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { markdown_content: '# New\n\nUpdated body' })
+    })
+
+    it('cancels the markdown edit without saving', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Original' })
+        const { hostContext, api } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="markdown-edit-button"]').trigger('click')
+        await flushPromises()
+        const editor = wrapper.find('[data-testid="markdown-editor"]')
+        await editor.setValue('discarded content')
+        await wrapper.find('[data-testid="markdown-cancel"]').trigger('click')
+        await flushPromises()
+        expect(api.patch).not.toHaveBeenCalled()
+        expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(false)
+        // Original content still showing in preview
+        expect(wrapper.text()).toContain('Original')
+    })
+
 })
