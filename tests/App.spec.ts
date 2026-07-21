@@ -266,6 +266,10 @@ describe('App.vue', () => {
     it('removes the asset and decrements total on detail page delete', async () => {
         const second: MediaAsset = { ...sample, id: 'test-2' }
         const get = vi.fn()
+            // Initial grid load (the test mounts at /asset/<id> but App.vue
+            // still issues the list call before the route watcher kicks
+            // in — the mock only matters if the test ever drives a
+            // back-navigation before the watcher fires).
             .mockResolvedValueOnce({
                 assets: [sample, second],
                 page: 1,
@@ -273,11 +277,25 @@ describe('App.vue', () => {
                 total: 2,
                 lastPage: 1,
             })
+            // Detail page load for the current asset.
             .mockResolvedValueOnce(sample)
+            // Post-delete grid reload: the delete handler pushes back to
+            // /apps/media-archive which fires the activeAssetId watcher
+            // and reissues /media — without this third return the mock
+            // resolves undefined, MediaGrid reads .length on undefined,
+            // and the unhandled rejection fails CI even though no
+            // assertion fails.
+            .mockResolvedValueOnce({
+                assets: [second],
+                page: 1,
+                perPage: 24,
+                total: 1,
+                lastPage: 1,
+            })
         const helper = buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` })
         const wrapper = mount(App, {
             props: { hostContext: helper },
-            
+
         })
         await flushPromises()
         await flushPromises()
