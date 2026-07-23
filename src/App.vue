@@ -171,42 +171,44 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <MediaDetailPage
-        v-if="isOnDetailPage && activeAssetId !== null"
-        :asset-id="activeAssetId"
-        :host-context="hostContext"
-        @updated="onAssetUpdated"
-        @deleted="onAssetDeleted"
-    />
-    <div v-else class="flex flex-col gap-6 text-foreground" data-testid="media-archive-grid-view">
-        <header class="flex flex-col gap-2">
-            <h2 class="text-lg font-semibold">Media Archive</h2>
-            <p class="text-sm text-muted-foreground">
-                {{ total }} {{ total === 1 ? 'asset' : 'assets' }} in your archive.
-            </p>
-        </header>
-
-        <MediaFilters
-            :type="query.mediaType ?? ''"
-            :search="query.search ?? ''"
-            :scope="scope"
-            @update:type="setType"
-            @update:search="setSearch"
-            @update:scope="setScope"
+    <div id="spora-plugin-media-archive">
+        <MediaDetailPage
+            v-if="isOnDetailPage && activeAssetId !== null"
+            :asset-id="activeAssetId"
+            :host-context="hostContext"
+            @updated="onAssetUpdated"
+            @deleted="onAssetDeleted"
         />
+        <div v-else class="flex flex-col gap-6 text-foreground" data-testid="media-archive-grid-view">
+            <header class="flex flex-col gap-2">
+                <h2 class="text-lg font-semibold">Media Archive</h2>
+                <p class="text-sm text-muted-foreground">
+                    {{ total }} {{ total === 1 ? 'asset' : 'assets' }} in your archive.
+                </p>
+            </header>
 
-        <div v-if="loading" class="text-sm text-muted-foreground">Loading media…</div>
-        <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            Failed to load media: {{ error }}
-        </div>
-        <MediaGrid v-else :assets="assets" @select="select" />
+            <MediaFilters
+                :type="query.mediaType ?? ''"
+                :search="query.search ?? ''"
+                :scope="scope"
+                @update:type="setType"
+                @update:search="setSearch"
+                @update:scope="setScope"
+            />
 
-        <div class="hidden">
-            <Image class="h-4 w-4" />
-            <FileAudio class="h-4 w-4" />
-            <FileVideo class="h-4 w-4" />
-            <FileText class="h-4 w-4" />
-            <Search class="h-4 w-4" />
+            <div v-if="loading" class="text-sm text-muted-foreground">Loading media…</div>
+            <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                Failed to load media: {{ error }}
+            </div>
+            <MediaGrid v-else :assets="assets" @select="select" />
+
+            <div class="hidden">
+                <Image class="h-4 w-4" />
+                <FileAudio class="h-4 w-4" />
+                <FileVideo class="h-4 w-4" />
+                <FileText class="h-4 w-4" />
+                <Search class="h-4 w-4" />
+            </div>
         </div>
     </div>
 </template>
