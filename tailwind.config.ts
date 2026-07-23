@@ -18,6 +18,9 @@ import { fontFamily } from 'tailwindcss/defaultTheme'
  */
 export default {
     content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
+    // Plugin CSS shares the host document, so keep resets and utilities contained.
+    corePlugins: { preflight: false },
+    important: '#spora-plugin-media-archive',
     darkMode: 'class',
     theme: {
         extend: {
