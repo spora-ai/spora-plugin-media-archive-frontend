@@ -65,28 +65,14 @@ export default defineConfig({
         rollupOptions: {
             external: ['vue', 'pinia'],
             output: {
-                // The host loads this bundle via dynamic `import()` from
-                // `apps/registry.ts → mountPlugin()`. Dynamic imports
-                // evaluate in module scope, where the top-level `this` is
-                // `undefined` (strict mode). Rollup's `extend: true`
-                // option would emit the lib binding as `this.<name> = ...`,
-                // which throws `Cannot set properties of undefined` at
-                // load time — the host then surfaces "Plugin failed to
-                // load". Leaving `extend` at its default (false) keeps
-                // Rollup's plain IIFE wrapper (`var <name> = (function()
-                // {…}(…));`), which is safe in module scope because
-                // `var` declarations are module-local and never shadow
-                // `window` properties. The explicit
-                // `window.SporaAppMediaArchive = SporaApp` in `src/main.ts`
-                // covers the dev-sandbox entry, which doesn't go through
-                // `vite build --lib` at all.
+                // `extend` must stay at its default. The host loads this
+                // bundle via dynamic `import()` (module scope, top-level
+                // `this` is `undefined`); `extend: true` would emit
+                // `this.<name> = ...` and throw at load.
                 //
-                // Substitute the default `})(Vue, Pinia);` call site with
-                // `})(window.Vue, window.Pinia);` — bare identifiers
-                // resolve to ReferenceErrors when the bundle is loaded
-                // as a module (Vue/Pinia aren't free variables in module
-                // scope). The host SPA publishes these globals before any
-                // plugin can load.
+                // `window.<external>` substitution avoids ReferenceErrors
+                // for Vue/Pinia — bare identifiers aren't free variables
+                // in module scope. Host publishes the globals first.
                 globals: {
                     vue: 'window.Vue',
                     pinia: 'window.Pinia',
