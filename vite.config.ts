@@ -65,14 +65,14 @@ export default defineConfig({
         rollupOptions: {
             external: ['vue', 'pinia'],
             output: {
-                // Avoid the IIFE wrapper injecting inline `var` declarations
-                // that would shadow window properties the host relies on.
-                extend: true,
-                // Substitute the default `})(Vue, Pinia);` call site with
-                // `})(window.Vue, window.Pinia);` — bare identifiers resolve
-                // to ReferenceErrors when the host dynamic-imports the bundle
-                // (the IIFE evaluates in module scope where Vue/Pinia aren't
-                // free variables). The host SPA publishes these globals.
+                // `extend` must stay at its default. The host loads this
+                // bundle via dynamic `import()` (module scope, top-level
+                // `this` is `undefined`); `extend: true` would emit
+                // `this.<name> = ...` and throw at load.
+                //
+                // `window.<external>` substitution avoids ReferenceErrors
+                // for Vue/Pinia — bare identifiers aren't free variables
+                // in module scope. Host publishes the globals first.
                 globals: {
                     vue: 'window.Vue',
                     pinia: 'window.Pinia',
