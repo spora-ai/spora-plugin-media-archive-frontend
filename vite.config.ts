@@ -94,6 +94,12 @@ export default defineConfig({
     test: {
         environment: 'happy-dom',
         globals: true,
+        // Exclude git worktrees (e.g. `.worktrees/<branch>/`) that may
+        // sit alongside this checkout. Their `tests/App.spec.ts` is a
+        // stale copy of the upstream tests and trips the same
+        // describe-blocks as ours; without this filter `npm test`
+        // would fail those instead of running ours.
+        exclude: ['node_modules', 'dist', '.git/**', '.worktrees/**'],
         // Pull in the `md-editor-v3` stub before any component imports it.
         // The real library mounts CodeMirror 6 + tries to fetch highlight.js
         // / katex / mermaid CSS from unpkg.com — neither works under

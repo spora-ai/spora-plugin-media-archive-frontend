@@ -20,6 +20,14 @@ The detail drawer (right-side panel that opens when a card is selected) covers t
 - Live region (`role="status"` + `aria-live="polite"`) announces sharing state and toast notifications to assistive tech.
 - All edit-save buttons disable while a save is in flight so the user cannot double-submit a conflicting PATCH.
 
+## Scope chip row
+
+The grid mounts a dashboard-style `ALL / My Media / Group A / …` chip row above the search input:
+
+- Pulls `/principals/me` + `/groups` on mount to populate the chip labels; both calls are best-effort so a transient failure leaves the empty-label fallback (`Group #N`) without blocking the grid.
+- Translates the single-pick chip state into repeated `?principal_id=` keys on the listing request — `ALL` sends every visible principal, `My Media` sends just the user-principal, a group chip sends just that group's principal. The controller intersects with `visiblePrincipalIds()`, so an out-of-scope id never reaches the service.
+- Click-the-active-chip-to-clear: matches the dashboard's flag-chip toggle behaviour.
+
 ## Build
 
 ```bash

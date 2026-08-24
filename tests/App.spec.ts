@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import App from '../src/App.vue'
-import type { MediaAsset, MediaListResponse } from '../src/types'
+import MediaFilters from '../src/components/MediaFilters.vue'
+import type {
+    MediaAsset,
+    MediaGroup,
+    MediaListResponse,
+    MediaPrincipal,
+} from '../src/types'
 import type { PluginHostContext } from '../src/shims'
 
 type GetFn = <T = unknown>(path: string) => Promise<T>
@@ -44,8 +50,52 @@ const emptyList: MediaListResponse = {
     lastPage: 1,
 }
 
-function buildContext(get: ReturnType<typeof vi.fn>, route?: { path: string }): PluginHostContext {
-    const api: MockedApi = { get, post: vi.fn(), patch: vi.fn(), delete: vi.fn() }
+/**
+ * Default principals + groups fixtures the App.vue's bootstrapScope()
+ * call resolves with. The plugin only reads `id` and `name`; the rest
+ * is here to mirror the wire shape from `GET /principals/me` and
+ * `GET /groups` so a future consumer that grows the panel doesn't
+ * have to rewire every test.
+ */
+const defaultPrincipals: MediaPrincipal[] = [
+    { id: 101, type: 'user', user_id: 1, group_id: null },
+    { id: 202, type: 'group', user_id: null, group_id: 10 },
+]
+const defaultGroups: MediaGroup[] = [
+    { id: 10, name: 'Marketing Team', principal_id: 202 },
+]
+
+/**
+ * Build a stub `hostContext` with the `get` mock and the
+ * `/principals/me` + `/groups` defaults stubbed in. The defaults
+ * mirror what the host returns for an authenticated user with one
+ * group; individual tests can override the `mediaHandlers` map to
+ * stub a different shape (empty principals, multi-group, etc.).
+ */
+function buildContext(
+    get: ReturnType<typeof vi.fn>,
+    route?: { path: string },
+    mediaHandlers?: { principals?: MediaPrincipal[]; groups?: MediaGroup[] },
+): PluginHostContext {
+    const principals = mediaHandlers?.principals ?? defaultPrincipals
+    const groups = mediaHandlers?.groups ?? defaultGroups
+    // Wrap the mock so the bootstrap calls resolve to the provided
+    // fixtures BEFORE falling through to the user's per-call
+    // expectations. The wrapper is transparent to anything that
+    // doesn't match a known endpoint.
+    const wrappedGet = vi.fn((path: string) => {
+        if (path === '/principals/me') {
+            return Promise.resolve({ principals })
+        }
+        if (path === '/groups') {
+            return Promise.resolve({ groups })
+        }
+        // `get` is a `Mock<...>` (callable-or-constructable union);
+        // cast to the callable signature so the inner `vi.fn()` body
+        // satisfies vue-tsc.
+        return (get as unknown as (path: string) => Promise<unknown>)(path)
+    })
+    const api: MockedApi = { get: wrappedGet, post: vi.fn(), patch: vi.fn(), delete: vi.fn() }
     // The plugin reads `hostContext.router.currentRoute.value.path` (a
     // `shallowRef`). Stub it with a plain `ref` whose value can be
     // reassigned in tests to simulate host navigation.
@@ -107,6 +157,7 @@ describe('App.vue', () => {
         expect(wrapper.find('#spora-plugin-media-archive').exists()).toBe(true)
         expect(wrapper.text()).toContain('Media Archive')
         expect(wrapper.text()).toContain('2 assets')
+        // Three API calls: /principals/me, /groups, /media.
         expect(get).toHaveBeenCalledTimes(1)
         // The plugin calls /media?page=1&per_page=24 — no filters.
         expect(get.mock.calls[0]?.[0]).toContain('/media?')
@@ -141,17 +192,111 @@ describe('App.vue', () => {
         expect(wrapper.text()).toContain('10 assets')
     })
 
-    it('passes scope=mine to the API when the scope toggle is flipped', async () => {
+    it('renders scope chips from /principals/me + /groups', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
         const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        expect(get).toHaveBeenCalledTimes(1)
-        await wrapper.find('[data-testid="media-scope-mine"]').trigger('click')
+        // Scope to the actual chip selector — `media-scope-chips` is the
+        // container div, not a chip, and would otherwise inflate the count.
+        const chips = wrapper.findAll('[data-testid^="media-scope-"]:not([data-testid="media-scope-chips"])')
+        // Default fixtures: ALL, My Media (user principal 101), Group A
+        // (group principal 202 = "Marketing Team") = 3 chips.
+        expect(chips).toHaveLength(3)
+        expect(wrapper.find('[data-testid="media-scope-all"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-scope-101"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-scope-202"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-scope-202"]').text()).toContain('Marketing Team')
+    })
+
+    it('labels the user-principal chip as "My Media", never as "Group #N"', () => {
+        // Regression for the bug where the user-principal was rendered
+        // with the `Group #${id}` fallback label because the frontend
+        // lost the `type` discriminator before MediaFilters could read
+        // it. The dashboard's own `My Agents` chip never had this bug
+        // — we should match its visual contract.
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [
+                    { id: 1, type: 'user', user_id: 1, group_id: null },
+                    { id: 5, type: 'group', user_id: null, group_id: 4 },
+                ],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
+        // The user-principal chip is data-testid="media-scope-1" but
+        // its label must say "My Media" regardless of the id number.
+        expect(wrapper.find('[data-testid="media-scope-1"]').text()).toContain('My Media')
+        expect(wrapper.find('[data-testid="media-scope-1"]').text()).not.toContain('Group #1')
+        // The group-principal chip falls back to `Group #5` because no
+        // /groups entry keyed principal_id=5 was provided.
+        expect(wrapper.find('[data-testid="media-scope-5"]').text()).toContain('Group #5')
+    })
+
+    it('omits the scope chip row when the user has no visible principals', async () => {
+        // A brand-new user with no groups: the chip row should hide
+        // entirely so the user isn't staring at an empty `ALL` button.
+        // The grid still works (the API falls back to the legacy
+        // ownership union).
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get, undefined, { principals: [], groups: [] })
+        const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        expect(get).toHaveBeenCalledTimes(2)
-        expect(get.mock.calls[1]?.[0]).toContain('scope=mine')
+        expect(wrapper.find('[data-testid="media-scope-chips"]').exists()).toBe(false)
+    })
+
+    it('sends every visible principal_id when scope is ALL (default)', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get); mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        // Default principals fixture: user 101 + group 202 → two
+        // `principal_id[]=` keys (URL-encoded as `%5B%5D` by
+        // URLSearchParams). ALL = the empty selection means "every
+        // visible principal", so both should be in the URL.
+        // The `[]` array suffix is required: PHP's `parse_str()`
+        // collapses repeated scalar keys to the LAST value, which
+        // would silently drop the user-principal id and surface only
+        // the last group's media.
+        const url = get.mock.calls.find((c) => c[0]?.startsWith('/media'))?.[0] ?? ''
+        expect(url).toContain('principal_id%5B%5D=101')
+        expect(url).toContain('principal_id%5B%5D=202')
+    })
+
+    it('sends a single principal_id when a group chip is clicked', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('principal_id%5B%5D=202')
+        // The user-principal must NOT be sent alongside the group chip
+        // — picking a specific group means "only this group", and the
+        // server's `includeUploads` branch would otherwise leak the
+        // user's own uploads into the per-group view.
+        expect(last).not.toContain('principal_id%5B%5D=101')
+    })
+
+    it('resets scope to ALL when the active chip is clicked again', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await flushPromises()
+        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('principal_id%5B%5D=101')
+        expect(last).toContain('principal_id%5B%5D=202')
     })
 
     it('drops stale responses when filters change faster than the network', async () => {
@@ -315,7 +460,7 @@ describe('App.vue', () => {
         const helper = buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` })
         const wrapper = mount(App, {
             props: { hostContext: helper },
-            
+
         })
         await flushPromises()
         await flushPromises()
