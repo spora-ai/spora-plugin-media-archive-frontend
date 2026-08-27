@@ -49,6 +49,33 @@ export interface MediaAsset {
 }
 
 /**
+ * Wire shape for a row returned by `GET /api/v1/principals/me`. Mirrors
+ * the host's `Principal` type but is scoped to what the Media Archive
+ * plugin actually reads: the principal id (used as the filter value),
+ * the type (so we can hide group chips for non-group principals), and
+ * the linked `group_id` so we can resolve a friendly label from the
+ * group list.
+ */
+export interface MediaPrincipal {
+    id: number
+    type: 'user' | 'group'
+    user_id: number | null
+    group_id: number | null
+}
+
+/**
+ * Wire shape for a row returned by `GET /api/v1/groups`. The plugin
+ * only needs the `id` and `name` to render a chip label; other fields
+ * exist so the host's `GroupDetailResource` shape doesn't surprise a
+ * future consumer.
+ */
+export interface MediaGroup {
+    id: number
+    name: string
+    principal_id: number | null
+}
+
+/**
  * The host's `spora-frontend/src/api/client.ts` unwraps the standard
  * `{ data: T }` envelope — the plugin receives `T` directly, not
  * `{ data: T }`. The actual list payload (see
@@ -67,10 +94,32 @@ export interface MediaListResponse {
     lastPage: number
 }
 
+/**
+ * What the user has picked in the dashboard-style scope chip row.
+ *
+ * - `null`     — `ALL`: send every visible principal id, so the
+ *                caller sees their own uploads plus every group
+ *                they belong to.
+ * - `[userId]` — `My Media`: send the caller's user-principal id
+ *                so direct uploads + their agents' media surface.
+ * - `[groupId]`— `Group X`: send a single group-principal id.
+ *
+ * `[]` (empty) is intentionally NOT a valid state — the chip row
+ * keeps the previously-selected principal so a transient empty
+ * group list never zeroes the filter.
+ */
 export interface MediaListQuery {
     page?: number
     perPage?: number
     mediaType?: MediaType | ''
     pluginSlug?: string
     search?: string
+    /**
+     * Repeated `?principal_id=` filter. The Media Archive plugin
+     * never sets this directly — it derives the value from
+     * `selectedPrincipalId` in `App.vue` and lets the build of
+     * `URLSearchParams` translate the single-pick state into the
+     * repeated-key wire shape the controller intersects.
+     */
+    principalIds?: number[]
 }

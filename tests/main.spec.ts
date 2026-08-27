@@ -48,36 +48,47 @@ describe('MediaGrid', () => {
 
 describe('MediaFilters', () => {
     it('emits update:type when a pill is clicked', async () => {
-        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'all' } })
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
         await wrapper.find('[data-testid="media-type-image"]').trigger('click')
         expect(wrapper.emitted('update:type')?.[0]?.[0]).toBe('image')
     })
 
     it('emits update:search as the user types', async () => {
-        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'all' } })
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
         const input = wrapper.find('[data-testid="media-search"]')
         await input.setValue('alpaca')
         expect(wrapper.emitted('update:search')?.[0]?.[0]).toBe('alpaca')
     })
 
     it('marks the active pill', () => {
-        const wrapper = mount(MediaFilters, { props: { type: 'audio', search: '', scope: 'all' } })
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: 'audio',
+                search: '',
+                principals: [],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
         const audio = wrapper.find('[data-testid="media-type-audio"]')
         // The active pill has the `bg-primary` class; the inactive ones don't.
         expect(audio.classes()).toContain('bg-primary')
-    })
-
-    it('emits update:scope with the flipped value when the scope toggle is clicked from "mine"', async () => {
-        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'mine' } })
-        await wrapper.find('[data-testid="media-scope-mine"]').trigger('click')
-        // scope === 'mine' → emit 'all' so the toggle reads as a toggle, not a sticky switch.
-        expect(wrapper.emitted('update:scope')?.[0]?.[0]).toBe('all')
-    })
-
-    it('marks the scope toggle as active when scope is "mine"', () => {
-        const wrapper = mount(MediaFilters, { props: { type: '', search: '', scope: 'mine' } })
-        const toggle = wrapper.find('[data-testid="media-scope-mine"]')
-        expect(toggle.classes()).toContain('bg-primary')
     })
 })
 

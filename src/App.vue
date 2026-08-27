@@ -1,14 +1,45 @@
 <script setup lang="ts">
+/**
+ * App.vue — Media Archive plugin shell.
+ *
+ * Owns:
+ *  - the page/grid state (assets, loading, error, total, query)
+ *  - the scope chip row state (visible principals, group labels, the
+ *    single-pick filter)
+ *  - the imperative route tracking (`router.afterEach`) so card clicks
+ *    flip between the grid and the asset detail page without a remount
+ *
+ * The plugin is mounted as a leaf under `/apps/media-archive`; the host
+ * router does not register a child route for `asset/:id`. We read the
+ * current path reactively and toggle between grid and detail. Browser
+ * back/forward, hard refresh, and URL sharing all work because the URL
+ * is the source of truth — see `lib/route-detection.ts`.
+ *
+ * Scope filter: see `MediaFilters.vue` for the chip row visuals; the
+ * backend contract is `GET /api/v1/media?principal_id=…` (repeatable),
+ * intersected server-side with the caller's visible principals by
+ * `MediaArchiveController::applyPrincipalScope()`.
+ */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Image, FileAudio, FileVideo, FileText, Search } from 'lucide-vue-next'
+import { FileAudio, FileVideo, FileText, Image, Search } from 'lucide-vue-next'
 import type { PluginHostContext } from './shims'
-import type { MediaAsset, MediaListQuery, MediaListResponse, MediaType } from './types'
+import type {
+    MediaAsset,
+    MediaGroup,
+    MediaListQuery,
+    MediaListResponse,
+    MediaPrincipal,
+    MediaType,
+} from './types'
 import { extractAssetId } from './lib/route-detection'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaFilters from './components/MediaFilters.vue'
 import MediaDetailPage from './pages/MediaDetailPage.vue'
 
 import './style.css'
+
+/** `null` is the "ALL" pick — see `MediaListQuery` for the semantics. */
+type SelectedScope = number | null
 
 const props = defineProps<{ hostContext: PluginHostContext }>()
 
@@ -36,16 +67,42 @@ const query = ref<MediaListQuery>({
     pluginSlug: '',
     search: '',
 })
-const scope = ref<'all' | 'mine'>('all')
-const total = ref(0)
 
 /**
- * The plugin is mounted as a leaf under `/apps/media-archive`; the host
- * router does not register a child route for `asset/:id`. We read the
- * current path reactively and toggle between grid and detail. Browser
- * back/forward, hard refresh, and URL sharing all work because the URL
- * is the source of truth — see `lib/route-detection.ts`.
+ * Selected principal id for the scope chip row. `null` is "ALL" — we
+ * pass every visible principal id to the API so the user's uploads
+ * plus every group they belong to surface. A number is a single
+ * principal (the user's user-principal for "My Media", a group's
+ * group-principal for "Group X").
  */
+const selectedScope = ref<SelectedScope>(null)
+
+/**
+ * Principals the caller can act as. Seeded from `GET /principals/me`
+ * (the user's user-principal + every group-principal of which they're a
+ * member). The full shape carries the `type: 'user' | 'group'`
+ * discriminator — `MediaFilters` needs that to label the user-principal
+ * chip `My Media` rather than `Group #${id}`. The values come from
+ * spora-core and are safe to send back without re-intersecting — the
+ * controller does its own `visiblePrincipalIds()` intersection as the
+ * last line of defence.
+ */
+const visiblePrincipals = ref<MediaPrincipal[]>([])
+
+/**
+ * Group labels keyed by principal id (NOT group id — the controller's
+ * principal filter takes principal ids, so we look up via the
+ * `principal_id` field on each `MediaGroup`). Empty until
+ * `GET /groups` resolves; the chip row falls back to `Group #${id}`
+ * while the lookup is in flight.
+ */
+const groupLabelsByPrincipalId = ref<Record<number, string>>({})
+
+/** Tracks whether the scope-bootstrap fetch is still pending. */
+const scopeLoading = ref(false)
+
+const total = ref(0)
+
 const activeAssetId = computed(() => extractAssetId(routePath.value))
 const isOnDetailPage = computed(() => activeAssetId.value !== null)
 
@@ -58,6 +115,25 @@ const isOnDetailPage = computed(() => activeAssetId.value !== null)
  */
 let requestId = 0
 
+/**
+ * Translate the single-pick `selectedScope` into the repeated-key wire
+ * shape the controller consumes.
+ *
+ * - `null`  → every visible principal id (`ALL`)
+ * - number  → just that principal id (`My Media` / `Group X`)
+ *
+ * Returning an empty array is safe: `URLSearchParams` skips empties
+ * and the controller treats `?principal_id=` (no values) the same as
+ * no `?principal_id=` at all — i.e. it falls back to the legacy
+ * `agentOwnerUserId` ownership union.
+ */
+function principalIdsForRequest(): number[] {
+    if (selectedScope.value !== null) {
+        return [selectedScope.value]
+    }
+    return visiblePrincipals.value.map((p) => p.id)
+}
+
 async function load(): Promise<void> {
     const myId = ++requestId
     loading.value = true
@@ -69,7 +145,18 @@ async function load(): Promise<void> {
         if (query.value.mediaType) params.set('type', query.value.mediaType)
         if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
         if (query.value.search) params.set('search', query.value.search)
-        if (scope.value === 'mine') params.set('scope', 'mine')
+        for (const id of principalIdsForRequest()) {
+            // Use the `principal_id[]` array form so PHP's `parse_str`
+            // (which Symfony uses internally) preserves every value.
+            // The plain `principal_id=` form collapses repeated scalar
+            // keys to the LAST one — meaning the `ALL` chip (which
+            // sends user-principal + every group-principal) silently
+            // dropped everything except the last group, so the user's
+            // own media (owned by the user-principal id) never surfaced.
+            // The controller reads `principal_id` regardless of the
+            // `[]` suffix because PHP strips it during parsing.
+            params.append('principal_id[]', String(id))
+        }
         const response = await api.value.get<MediaListResponse>(
             `/media?${params.toString()}`,
         )
@@ -86,6 +173,49 @@ async function load(): Promise<void> {
     }
 }
 
+/**
+ * Pull the caller's visible principals + the group list in parallel so
+ * the scope chip row can render labels as soon as the plugin mounts.
+ *
+ * Both calls are best-effort: a transient failure (group list 404 on
+ * an installation without the Groups feature, say) leaves the chip
+ * row in the empty-label state but does not block the grid. The grid
+ * still gets a working `principalIds` filter via `visiblePrincipalIds`,
+ * which is fetched independently from `/principals/me`.
+ */
+async function bootstrapScope(): Promise<void> {
+    scopeLoading.value = true
+    try {
+        const [principals, groups] = await Promise.all([
+            api.value
+                .get<{ principals: MediaPrincipal[] }>('/principals/me')
+                .then((r) => r.principals ?? [])
+                .catch(() => [] as MediaPrincipal[]),
+            api.value
+                .get<{ groups: MediaGroup[] }>('/groups')
+                .then((r) => r.groups ?? [])
+                .catch(() => [] as MediaGroup[]),
+        ])
+        if (principals.length === 0) {
+            visiblePrincipals.value = []
+            groupLabelsByPrincipalId.value = {}
+            return
+        }
+        visiblePrincipals.value = principals
+        // Index labels by principal id (not group id) so the chip
+        // picker can resolve a name via the principal it carries.
+        const labels: Record<number, string> = {}
+        for (const g of groups) {
+            if (g.principal_id !== null) {
+                labels[g.principal_id] = g.name
+            }
+        }
+        groupLabelsByPrincipalId.value = labels
+    } finally {
+        scopeLoading.value = false
+    }
+}
+
 function setType(type: MediaType | ''): void {
     query.value = { ...query.value, mediaType: type, page: 1 }
     void load()
@@ -96,8 +226,8 @@ function setSearch(search: string): void {
     void load()
 }
 
-function setScope(next: 'all' | 'mine'): void {
-    scope.value = next
+function setScope(next: SelectedScope): void {
+    selectedScope.value = next
     query.value = { ...query.value, page: 1 }
     void load()
 }
@@ -142,7 +272,12 @@ function onAssetDeleted(id: string): void {
 
 let unregisterAfterEach: (() => void) | null = null
 
-onMounted(() => {
+onMounted(async () => {
+    // Await the scope bootstrap so the initial load() call carries
+    // the correct `principal_id` set — racing the two would silently
+    // emit a request without the filter on the very first paint
+    // (bootstrapScope's `visiblePrincipalIds` would still be empty).
+    await bootstrapScope()
     if (!isOnDetailPage.value) {
         void load()
     }
@@ -190,7 +325,9 @@ onBeforeUnmount(() => {
             <MediaFilters
                 :type="query.mediaType ?? ''"
                 :search="query.search ?? ''"
-                :scope="scope"
+                :principals="visiblePrincipals"
+                :selected-scope="selectedScope"
+                :group-labels="groupLabelsByPrincipalId"
                 @update:type="setType"
                 @update:search="setSearch"
                 @update:scope="setScope"
