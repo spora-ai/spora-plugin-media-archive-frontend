@@ -11,10 +11,11 @@ import {
     Trash2,
     X,
 } from 'lucide-vue-next'
-import type { MediaAsset } from '../types'
+import type { MediaAsset, MediaDerivative } from '../types'
 import type { PluginHostContext } from '../shims'
 import { MdEditor, MdPreview, type ToolbarNames } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
+import VersionsStrip from '../components/VersionsStrip.vue'
 
 /**
  * Toolbar buttons rendered on the markdown editor. Mirrors the host SPA's
@@ -301,6 +302,46 @@ async function confirmDelete(): Promise<void> {
     }
 }
 
+/**
+ * Splice a freshly-produced derivative into `asset.derivatives`. We
+ * keep the locally-returned asset id + URL so the strip's chip row
+ * updates immediately; a follow-up `loadAsset()` would also work,
+ * but the local write is cheaper and avoids the race where a
+ * concurrent PATCH clobbers the user's in-progress edits.
+ */
+function onDerivativeProduced(derivative: MediaAsset): void {
+    if (asset.value === null) return
+    const list = [...(asset.value.derivatives ?? [])]
+    const summary: MediaDerivative = {
+        format: extractFormat(derivative),
+        media_id: derivative.id,
+        asset_url: derivative.asset_url,
+        producer_plugin: derivative.plugin_slug,
+        producer_operation: derivative.tool_name,
+        created_at: derivative.created_at,
+    }
+    const existingIndex = list.findIndex((d) => d.media_id === summary.media_id)
+    if (existingIndex >= 0) {
+        list.splice(existingIndex, 1, summary)
+    } else {
+        list.push(summary)
+    }
+    asset.value = { ...asset.value, derivatives: list }
+}
+
+/**
+ * Best-effort "what format did this asset come back in?". The
+ * controller's `produce()` returns a `MediaAsset` (the new
+ * `media_assets` row), not the wire shape that lives inside the
+ * parent's `derivatives[]`. The MIME is the cleanest source of truth;
+ * it ends in `/pdf`, `/png`, etc.
+ */
+function extractFormat(derivative: MediaAsset): string {
+    const mime = derivative.mime_type ?? ''
+    const slash = mime.lastIndexOf('/')
+    return slash >= 0 ? mime.slice(slash + 1).toLowerCase() : ''
+}
+
 function safeExternalUrl(url: string | null | undefined): string | null {
     if (url === null || url === undefined) return null
     const trimmed = url.trim()
@@ -394,6 +435,11 @@ onBeforeUnmount(() => {
         </header>
 
         <template v-if="asset">
+            <VersionsStrip
+                :asset="asset"
+                :host-context="hostContext"
+                @produced="onDerivativeProduced"
+            />
             <!-- Preview -->
             <figure
                 v-if="asset.media_type === 'image'"

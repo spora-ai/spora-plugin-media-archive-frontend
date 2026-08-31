@@ -26,6 +26,7 @@ const sample: MediaAsset = {
     task_id: null,
     tool_call_id: null,
     created_at: new Date().toISOString(),
+    derivatives: [],
 }
 
 describe('MediaGrid', () => {

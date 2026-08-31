@@ -40,6 +40,7 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't1',
         tool_call_id: 'tc1',
         created_at: new Date().toISOString(),
+        derivatives: [],
     },
     {
         id: 'demo-2',
@@ -63,6 +64,7 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't2',
         tool_call_id: 'tc2',
         created_at: new Date(Date.now() - 3600000).toISOString(),
+        derivatives: [],
     },
     {
         id: 'demo-3',
@@ -86,6 +88,7 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't3',
         tool_call_id: 'tc3',
         created_at: new Date(Date.now() - 7200000).toISOString(),
+        derivatives: [],
     },
     {
         id: 'demo-4',
@@ -109,6 +112,7 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't4',
         tool_call_id: 'tc4',
         created_at: new Date(Date.now() - 86400000).toISOString(),
+        derivatives: [],
     },
     {
         id: 'demo-5',
@@ -144,6 +148,7 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't5',
         tool_call_id: 'tc5',
         created_at: new Date(Date.now() - 172800000).toISOString(),
+        derivatives: [],
     },
 ]
 
@@ -230,6 +235,9 @@ export function createMockApi(): PluginHostContext['api'] {
         },
         post: async () => {
             throw new Error('POST not supported in mock')
+        },
+        postForm: async (_path: string, _body: FormData) => {
+            throw new Error('POST FormData not supported in mock')
         },
         patch: async () => {
             throw new Error('PATCH not supported in mock')

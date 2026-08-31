@@ -50,6 +50,7 @@ const sample: MediaAsset = {
     task_id: null,
     tool_call_id: null,
     created_at: new Date().toISOString(),
+    derivatives: [],
 }
 
 afterEach(() => {
@@ -171,16 +172,25 @@ describe('MediaDetailPage', () => {
 
     it('refetches when the assetId prop changes', async () => {
         const get = vi.fn()
+            // Initial detail page load.
             .mockResolvedValueOnce(sample)
+            // VersionsStrip fires the options endpoint on mount (one per
+            // detail-page load).
+            .mockResolvedValueOnce([])
+            // setProps → second detail page load.
             .mockResolvedValueOnce({ ...sample, id: 'test-2', filename: 'two.png' })
+            // VersionsStrip fires the options endpoint again on id change.
+            .mockResolvedValueOnce([])
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        expect(get).toHaveBeenCalledTimes(1)
+        // Two fetches: the asset + the VersionsStrip options endpoint.
+        expect(get).toHaveBeenCalledTimes(2)
         await wrapper.setProps({ assetId: 'test-2' })
         await flushPromises()
-        expect(get).toHaveBeenCalledTimes(2)
-        expect(get.mock.calls[1]?.[0]).toBe('/media/test-2')
+        // Two more fetches: the new asset + the options endpoint again.
+        expect(get).toHaveBeenCalledTimes(4)
+        expect(get.mock.calls[2]?.[0]).toBe('/media/test-2')
         expect(wrapper.find('[data-testid="media-detail-filename"]').text()).toContain('two.png')
     })
 
@@ -466,6 +476,42 @@ describe('MediaDetailPage', () => {
         expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(false)
         // Original content still showing in preview
         expect(wrapper.text()).toContain('Original')
+    })
+
+    it('mounts the Versions strip above the preview block and reads derivatives from the asset', async () => {
+        // The strip's options endpoint is also fired on mount; both
+        // responses are pre-stubbed on the same `get` mock so the
+        // page settles deterministically without unmocked promises.
+        const derivatives = [
+            {
+                format: 'pdf',
+                media_id: 'derivative-pdf-1',
+                asset_url: '/api/v1/assets/derivative-pdf-1.pdf',
+                producer_plugin: 'typst',
+                producer_operation: 'render',
+                created_at: '2026-01-01T00:00:01.000Z',
+            },
+        ]
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, derivatives })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        const versionsStrip = wrapper.find('[data-testid="versions-strip"]')
+        expect(versionsStrip.exists()).toBe(true)
+        // The strip lists the existing derivatives as chips.
+        const chips = versionsStrip.findAll('[data-testid="versions-derivative-chip"]')
+        expect(chips).toHaveLength(1)
+        expect(chips[0]?.text()).toContain('PDF')
+        // The strip lives ABOVE the existing preview block — the
+        // relative DOM order matters for the visual contract.
+        const preview = wrapper.find('[data-testid="media-preview-figure"]')
+        expect(preview.exists()).toBe(true)
+        const order = wrapper.html().indexOf('versions-strip')
+        const previewOrder = wrapper.html().indexOf('media-preview-figure')
+        expect(order).toBeLessThan(previewOrder)
     })
 
 })

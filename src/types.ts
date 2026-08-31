@@ -8,6 +8,31 @@
  */
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'unknown'
 
+/**
+ * Wire shape for a single derivative row returned inside
+ * `MediaAsset.derivatives[]` (see `MediaAssetSerializer::serialize()` in
+ * spora-core). The set of formats is open — `string` because a Typst
+ * render emits `pdf` and an image converter emits `png|jpeg|svg` while
+ * future producers can register anything they like via
+ * `MediaDerivativeProducerDiscovery`. The four-format union is purely
+ * a hint for autocomplete / linter; the renderer treats it as `string`
+ * at runtime.
+ *
+ * `media_id` is the new `media_assets.id` UUID the controller created
+ * for the derivative; `asset_url` is its served path. The two are
+ * distinct on purpose: a derivative might outlive the source bytes
+ * (different storage backend, different CDN) and the URL is the
+ * loadable handle.
+ */
+export interface MediaDerivative {
+    format: 'pdf' | 'png' | 'jpeg' | 'svg' | string
+    media_id: string
+    asset_url: string
+    producer_plugin: string | null
+    producer_operation: string | null
+    created_at: string | null
+}
+
 export type StorageMode = 'local' | 'data_url' | 'external'
 
 export interface MediaAsset {
@@ -46,6 +71,15 @@ export interface MediaAsset {
     task_id: string | null
     tool_call_id: string | null
     created_at: string
+    /**
+     * Pre-baked derivatives registered against this asset by any
+     * `MediaDerivativeProducerInterface` implementation. The field is
+     * always present (possibly empty) — `MediaAssetSerializer`'s
+     * `$includeDerivatives` flag controls whether the controller can
+     * opt out of the JOIN on tight listing loops. The frontend never
+     * sets this itself; it reads what the server returned.
+     */
+    derivatives: MediaDerivative[]
 }
 
 /**

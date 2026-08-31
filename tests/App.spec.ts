@@ -15,6 +15,7 @@ type GetFn = <T = unknown>(path: string) => Promise<T>
 type MockedApi = {
     get: GetFn | ReturnType<typeof vi.fn>
     post: ReturnType<typeof vi.fn>
+    postForm: ReturnType<typeof vi.fn>
     patch: ReturnType<typeof vi.fn>
     delete: ReturnType<typeof vi.fn>
 }
@@ -40,6 +41,7 @@ const sample: MediaAsset = {
     task_id: null,
     tool_call_id: null,
     created_at: new Date().toISOString(),
+    derivatives: [],
 }
 
 const emptyList: MediaListResponse = {
@@ -95,7 +97,13 @@ function buildContext(
         // satisfies vue-tsc.
         return (get as unknown as (path: string) => Promise<unknown>)(path)
     })
-    const api: MockedApi = { get: wrappedGet, post: vi.fn(), patch: vi.fn(), delete: vi.fn() }
+    const api: MockedApi = {
+        get: wrappedGet,
+        post: vi.fn(),
+        postForm: vi.fn(),
+        patch: vi.fn(),
+        delete: vi.fn(),
+    }
     // The plugin reads `hostContext.router.currentRoute.value.path` (a
     // `shallowRef`). Stub it with a plain `ref` whose value can be
     // reassigned in tests to simulate host navigation.
@@ -517,5 +525,36 @@ describe('App.vue', () => {
 
         expect(wrapper.find('[data-testid="media-archive-grid-view"]').exists()).toBe(false)
         expect(wrapper.find('[data-testid="media-detail-page"]').exists()).toBe(true)
+    })
+
+    it('renders the Upload button in the toolbar when principals are visible', async () => {
+        const get = vi.fn().mockResolvedValueOnce(emptyList)
+        const ctx = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: ctx } })
+        await flushPromises()
+        await flushPromises()
+        const button = wrapper.find('[data-testid="media-archive-upload-button"]')
+        expect(button.exists()).toBe(true)
+        // The button must NOT be disabled because the default fixtures
+        // include a user-principal + a group-principal.
+        expect(button.attributes('disabled')).toBeUndefined()
+
+        await button.trigger('click')
+        await flushPromises()
+        // Clicking opens the upload dialog.
+        expect(wrapper.find('[data-testid="media-upload-dialog"]').exists()).toBe(true)
+    })
+
+    it('disables the Upload button when no principals are visible', async () => {
+        const get = vi.fn().mockResolvedValueOnce(emptyList)
+        const ctx = buildContext(get, undefined, { principals: [], groups: [] })
+        const wrapper = mount(App, { props: { hostContext: ctx } })
+        await flushPromises()
+        await flushPromises()
+        const button = wrapper.find('[data-testid="media-archive-upload-button"]')
+        expect(button.exists()).toBe(true)
+        // Defence-in-depth: a brand-new user with no visible principals
+        // must NOT be able to open the upload surface.
+        expect(button.attributes('disabled')).toBeDefined()
     })
 })

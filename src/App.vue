@@ -21,7 +21,7 @@
  * `MediaArchiveController::applyPrincipalScope()`.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { FileAudio, FileVideo, FileText, Image, Search } from 'lucide-vue-next'
+import { FileAudio, FileVideo, FileText, Image, Search, Upload } from 'lucide-vue-next'
 import type { PluginHostContext } from './shims'
 import type {
     MediaAsset,
@@ -34,6 +34,7 @@ import type {
 import { extractAssetId } from './lib/route-detection'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaFilters from './components/MediaFilters.vue'
+import MediaUploadDialog from './components/MediaUploadDialog.vue'
 import MediaDetailPage from './pages/MediaDetailPage.vue'
 
 import './style.css'
@@ -102,6 +103,15 @@ const groupLabelsByPrincipalId = ref<Record<number, string>>({})
 const scopeLoading = ref(false)
 
 const total = ref(0)
+
+/**
+ * Upload dialog state. The header button flips this open; the dialog's
+ * `defaultPrincipalId` snaps from `selectedScope` so the upload lands
+ * in the same scope the operator was already browsing. Subsequent
+ * scope chip changes don't retroactively change the dialog's
+ * selection — the dialog owns its own state from open-to-close.
+ */
+const uploadDialogOpen = ref(false)
 
 const activeAssetId = computed(() => extractAssetId(routePath.value))
 const isOnDetailPage = computed(() => activeAssetId.value !== null)
@@ -270,6 +280,28 @@ function onAssetDeleted(id: string): void {
     }
 }
 
+/**
+ * Open the upload modal. Triggered from the header "Upload" button
+ * AND from the grid's empty-state CTA via `MediaGrid`'s `upload-click`
+ * event. The grid-to-header handoff keeps the trigger colocated with
+ * the affordance that introduced it (a header button for the active
+ * scope; a CTA when the grid is empty).
+ */
+function openUploadDialog(): void {
+    uploadDialogOpen.value = true
+}
+
+/**
+ * Dialog confirms an upload completed. Re-fetching is cheaper than
+ * splicing the asset into the existing `assets` array because the
+ * serializer's `derivatives` field, principal rewrite, and pagination
+ * are all server-side concerns; diffing those locally would just
+ * hand-roll a smaller `load()`.
+ */
+async function onUploaded(_asset: MediaAsset): Promise<void> {
+    await load()
+}
+
 let unregisterAfterEach: (() => void) | null = null
 
 onMounted(async () => {
@@ -316,7 +348,19 @@ onBeforeUnmount(() => {
         />
         <div v-else class="flex flex-col gap-6 text-foreground" data-testid="media-archive-grid-view">
             <header class="flex flex-col gap-2">
-                <h2 class="text-lg font-semibold">Media Archive</h2>
+                <div class="flex items-center justify-between gap-2">
+                    <h2 class="text-lg font-semibold">Media Archive</h2>
+                    <button
+                        type="button"
+                        :disabled="visiblePrincipals.length === 0"
+                        class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                        data-testid="media-archive-upload-button"
+                        @click="openUploadDialog"
+                    >
+                        <Upload class="h-3.5 w-3.5" />
+                        Upload
+                    </button>
+                </div>
                 <p class="text-sm text-muted-foreground">
                     {{ total }} {{ total === 1 ? 'asset' : 'assets' }} in your archive.
                 </p>
@@ -337,7 +381,17 @@ onBeforeUnmount(() => {
             <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
                 Failed to load media: {{ error }}
             </div>
-            <MediaGrid v-else :assets="assets" @select="select" />
+            <MediaGrid v-else :assets="assets" @select="select" @upload-click="openUploadDialog" />
+
+            <MediaUploadDialog
+                v-if="uploadDialogOpen"
+                :host-context="hostContext"
+                :principals="visiblePrincipals"
+                :group-labels="groupLabelsByPrincipalId"
+                :default-principal-id="selectedScope"
+                @uploaded="onUploaded"
+                @close="uploadDialogOpen = false"
+            />
 
             <div class="hidden">
                 <Image class="h-4 w-4" />
@@ -345,6 +399,7 @@ onBeforeUnmount(() => {
                 <FileVideo class="h-4 w-4" />
                 <FileText class="h-4 w-4" />
                 <Search class="h-4 w-4" />
+                <Upload class="h-4 w-4" />
             </div>
         </div>
     </div>
