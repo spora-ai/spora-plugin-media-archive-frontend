@@ -10,13 +10,11 @@ export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'unknown'
 
 /**
  * Wire shape for a single derivative row returned inside
- * `MediaAsset.derivatives[]` (see `MediaAssetSerializer::serialize()` in
- * spora-core). The set of formats is open — `string` because a Typst
- * render emits `pdf` and an image converter emits `png|jpeg|svg` while
- * future producers can register anything they like via
- * `MediaDerivativeProducerDiscovery`. The four-format union is purely
- * a hint for autocomplete / linter; the renderer treats it as `string`
- * at runtime.
+ * `MediaAsset.derivatives[]` (see `MediaAssetSerializer::serialize()`
+ * in spora-core). The set of formats is open — `string` because a
+ * Typst render emits `pdf` and an image converter emits
+ * `png|jpeg|svg` while future producers can register anything they
+ * like via `MediaDerivativeProducerDiscovery`.
  *
  * `media_id` is the new `media_assets.id` UUID the controller created
  * for the derivative; `asset_url` is its served path. The two are
@@ -25,7 +23,7 @@ export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'unknown'
  * loadable handle.
  */
 export interface MediaDerivative {
-    format: 'pdf' | 'png' | 'jpeg' | 'svg' | string
+    format: string
     media_id: string
     asset_url: string
     producer_plugin: string | null
