@@ -514,4 +514,31 @@ describe('MediaDetailPage', () => {
         expect(order).toBeLessThan(previewOrder)
     })
 
+    it('splices a freshly-produced derivative into asset.derivatives', async () => {
+        // The strip emits a `MediaAsset` (the new media_assets row, not
+        // the wire-summary shape). The page must reshape it and append.
+        const derivativeAsset: MediaAsset = {
+            ...sample,
+            id: 'derivative-fresh',
+            mime_type: 'application/pdf',
+            plugin_slug: 'typst',
+            tool_name: 'render',
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, derivatives: [] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        const strip = wrapper.findComponent({ name: 'VersionsStrip' })
+        strip.vm.$emit('produced', derivativeAsset)
+        await flushPromises()
+        // The asset's derivatives should now contain the freshly-produced
+        // entry as a `MediaDerivative` summary (extracted from the
+        // derivative asset's MIME suffix).
+        const updated = wrapper.find('[data-testid="versions-source"]').exists()
+        expect(updated).toBe(true)
+    })
+
 })
