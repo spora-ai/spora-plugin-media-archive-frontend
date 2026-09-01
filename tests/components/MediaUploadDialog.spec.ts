@@ -130,6 +130,14 @@ function principalSelect(): HTMLSelectElement {
     return document.querySelector('[data-testid="upload-principal-select"]') as HTMLSelectElement
 }
 
+function uploadDialog(): HTMLDialogElement {
+    return document.querySelector('[data-testid="media-upload-dialog"]') as HTMLDialogElement
+}
+
+function uploadBackdrop(): HTMLElement {
+    return document.querySelector('[data-testid="upload-dialog-backdrop"]') as HTMLElement
+}
+
 beforeEach(() => {
     // happy-dom ships an unimplemented HTMLDialogElement; patch the
     // two methods the dialog uses so `open()` / `close()` exercise the
@@ -291,6 +299,69 @@ describe('MediaUploadDialog', () => {
         const emitted = wrapper.emitted('uploaded')
         expect(emitted).toBeDefined()
         expect(emitted?.[0]?.[0]).toMatchObject({ id: sampleAsset.id })
+        wrapper.unmount()
+    })
+
+    it('closes the dialog when the backdrop is clicked directly', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const dialog = uploadDialog()
+        const backdrop = uploadBackdrop()
+        expect(dialog.open).toBe(true)
+        // `@click.self` semantics: only fire when target === currentTarget,
+        // i.e. the click lands on the backdrop element itself rather than
+        // any of its descendants. We synthesise that explicitly.
+        backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await flushPromises()
+        expect(dialog.open).toBe(false)
+        expect(wrapper.emitted('close')).toBeDefined()
+        wrapper.unmount()
+    })
+
+    it('does not close when the click lands on the inner card', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const dialog = uploadDialog()
+        // A click that bubbles from the inner card should be stopped by the
+        // card's `@click.stop` handler before reaching `@click.self` on the
+        // backdrop wrapper.
+        dialog.querySelector('[data-testid="media-upload-form"]')!.dispatchEvent(
+            new MouseEvent('click', { bubbles: true }),
+        )
+        await flushPromises()
+        expect(dialog.open).toBe(true)
+        expect(wrapper.emitted('close')).toBeUndefined()
+        wrapper.unmount()
+    })
+
+    it('closes the dialog when the native cancel event fires (Escape key)', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const dialog = uploadDialog()
+        expect(dialog.open).toBe(true)
+        // `<dialog>` raises `cancel` (cancellable) when the user presses
+        // Escape. `@cancel.prevent` runs `close()`, which calls the native
+        // `close()` (flipping `open` to false) and emits `close` to the
+        // parent so the `v-if` unmounts the component.
+        dialog.dispatchEvent(new Event('cancel', { bubbles: true, cancelable: true }))
+        await flushPromises()
+        expect(dialog.open).toBe(false)
+        expect(wrapper.emitted('close')).toBeDefined()
         wrapper.unmount()
     })
 })
