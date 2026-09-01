@@ -227,6 +227,11 @@ defineExpose({ open, close })
 
 onMounted(() => {
     principalId.value = resolveInitialPrincipal()
+    // Parent mounts the dialog via `v-if="uploadDialogOpen"` and never
+    // holds a template ref, so we open ourselves here. Without this the
+    // `<dialog>` element is in the DOM but closed — clicks on the header
+    // Upload button look like nothing happens.
+    dialogRef.value?.showModal()
 })
 
 watch(() => props.principals, () => {
