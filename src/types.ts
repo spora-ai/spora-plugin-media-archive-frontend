@@ -24,6 +24,13 @@ export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'unknown'
  */
 export interface MediaDerivative {
     format: string
+    /**
+     * Short chip label for `VersionsStrip`. Falls back to
+     * `format.toUpperCase()` if the server didn't include one
+     * (older spora-core versions, or producers outside the
+     * ImageDerivativeFormat catalogue).
+     */
+    label?: string
     media_id: string
     asset_url: string
     producer_plugin: string | null

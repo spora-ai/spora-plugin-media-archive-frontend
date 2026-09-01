@@ -36,6 +36,14 @@ import {
 interface Props {
     asset: MediaAsset
     hostContext: PluginHostContext
+    /**
+     * Parent-owned active-derivative id. When `'source'` (or undefined)
+     * the Source chip is the active one; any other id matches the
+     * `media_id` of the corresponding derivative chip. The strip mirrors
+     * this so the parent can drive both the preview and the chip
+     * highlight from a single piece of state without prop drilling.
+     */
+    selectedDerivativeId?: string
 }
 
 const props = defineProps<Props>()
@@ -53,7 +61,21 @@ const loadingOptions = ref(false)
 const converting = ref<string | null>(null)
 const convertError = ref<string | null>(null)
 
-const selectedDerivativeId = ref<string>(props.asset.id)
+/**
+ * The chip row's active highlight. Defaults to the source asset's id
+ * (the "Source" chip) and tracks the parent-owned
+ * `selectedDerivativeId` so the strip mirrors the preview pane without
+ * its own duplicate state. When the parent resets the prop back to
+ * `'source'` (after a successful "Convert to" splice, or a navigation
+ * away to a different detail page), the Source chip lights up again.
+ */
+const selectedDerivativeId = computed<string>(
+    () => props.selectedDerivativeId ?? props.asset.id,
+)
+
+function isSource(id: string): boolean {
+    return id === props.asset.id
+}
 
 async function refreshOptions(): Promise<void> {
     loadingOptions.value = true
@@ -69,8 +91,7 @@ async function refreshOptions(): Promise<void> {
     }
 }
 
-watch(() => props.asset.id, (id) => {
-    selectedDerivativeId.value = id
+watch(() => props.asset.id, () => {
     optionList.value = []
     void refreshOptions()
 })
@@ -79,12 +100,20 @@ onMounted(() => {
     void refreshOptions()
 })
 
-function isSource(id: string): boolean {
-    return id === props.asset.id
+function chipLabel(derivative: { format: string, label?: string }): string {
+    // Server-supplied chip label wins; the upper-case format slug is
+    // the universal fallback for older spora-core versions and for
+    // producers outside the ImageDerivativeFormat catalogue.
+    return derivative.label !== undefined && derivative.label !== ''
+        ? derivative.label
+        : derivative.format.toUpperCase()
 }
 
 function onChipClick(derivativeId: string): void {
-    selectedDerivativeId.value = derivativeId
+    // Parent owns `selectedDerivativeId` so the strip can mirror the
+    // preview pane without duplicate state. Just forward the click —
+    // `MediaDetailPage.vue`'s `onDerivativeSelected` decides what the
+    // id maps to (source row → `'source'`, derivative row → media_id).
     emit('select', derivativeId)
 }
 
@@ -142,10 +171,11 @@ async function convertTo(format: string): Promise<void> {
                         : 'border-border bg-background text-muted-foreground hover:text-foreground'
                 "
                 :data-format="derivative.format"
+                :title="`${derivative.format} — click to preview`"
                 data-testid="versions-derivative-chip"
                 @click="onChipClick(derivative.media_id)"
             >
-                {{ derivative.format.toUpperCase() }}
+                {{ chipLabel(derivative) }}
             </button>
         </div>
 

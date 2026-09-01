@@ -67,6 +67,51 @@ const asset = ref<MediaAsset | null>(null)
 const loading = ref(false)
 const errorMessage = ref<string | null>(null)
 
+/**
+ * The detail page renders the asset's source bytes by default, but
+ * `VersionsStrip` lets the operator flip between source and any
+ * derivative via a chip row. `selectedDerivativeId` tracks the
+ * currently-prepped row — `'source'` (string literal) renders the
+ * parent; any other id resolves through the derivatives array.
+ *
+ * Resetting to `'source'` whenever the asset id changes (router
+ * navigation to a different detail page) keeps the strip from
+ * carrying the previous page's selection across.
+ */
+const selectedDerivativeId = ref<string>('source')
+
+/**
+ * Selected derivative for the current selection, or `null` when the
+ * source is being shown. Computed separately from the parent asset so
+ * the preview pane can branch on whether a derivative is active.
+ */
+const selectedDerivative = computed<MediaDerivative | null>(() => {
+    if (asset.value === null) return null
+    if (selectedDerivativeId.value === 'source') return null
+    return asset.value.derivatives.find(d => d.media_id === selectedDerivativeId.value)
+        ?? null
+})
+
+/**
+ * What the `<img :src>` and the lightbox render. Source by default,
+ * derivative URL when a chip is active. Returns `null` while the asset
+ * is still loading so the template can short-circuit the <img>.
+ */
+const previewSrc = computed<string | null>(() => {
+    if (asset.value === null) return null
+    return selectedDerivative.value !== null
+        ? selectedDerivative.value.asset_url
+        : asset.value.asset_url
+})
+
+const previewAlt = computed<string>(() => {
+    if (asset.value === null) return 'Archived'
+    const base = asset.value.prompt ?? asset.value.filename ?? 'Archived'
+    return selectedDerivative.value !== null
+        ? `${base} (derivative)`
+        : base
+})
+
 const lightboxRef = ref<HTMLDialogElement | null>(null)
 const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
@@ -82,11 +127,26 @@ async function loadAsset(): Promise<void> {
     try {
         const fetched = await api.value.get<MediaAsset>(`/media/${props.assetId}`)
         asset.value = fetched
+        selectedDerivativeId.value = 'source'
     } catch (e) {
         errorMessage.value = e instanceof Error ? e.message : String(e)
     } finally {
         loading.value = false
     }
+}
+
+/**
+ * Strip chip click → swap the preview to the chosen derivative.
+ * VersionsStrip emits the derivative's `media_id` (the parent emits
+ * its own id; we map that to the literal `'source'` so the source
+ * chip also flips the preview back).
+ */
+function onDerivativeSelected(mediaId: string): void {
+    if (asset.value !== null && mediaId === asset.value.id) {
+        selectedDerivativeId.value = 'source'
+        return
+    }
+    selectedDerivativeId.value = mediaId
 }
 
 const createdAt = computed(() => {
@@ -438,6 +498,8 @@ onBeforeUnmount(() => {
             <VersionsStrip
                 :asset="asset"
                 :host-context="hostContext"
+                :selected-derivative-id="selectedDerivativeId"
+                @select="onDerivativeSelected"
                 @produced="onDerivativeProduced"
             />
             <!-- Preview -->
@@ -448,10 +510,18 @@ onBeforeUnmount(() => {
                 @click="openLightbox"
             >
                 <img
-                    :src="asset.asset_url"
-                    :alt="asset.prompt ?? 'Archived'"
+                    :src="previewSrc ?? ''"
+                    :alt="previewAlt"
                     class="max-h-full max-w-full object-contain"
+                    data-testid="media-preview-img"
                 />
+                <div
+                    v-if="selectedDerivativeId !== 'source'"
+                    class="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground shadow-sm"
+                    data-testid="media-preview-derivative-badge"
+                >
+                    Viewing derivative
+                </div>
                 <div class="pointer-events-none absolute inset-0 flex items-end justify-end bg-gradient-to-t from-foreground/40 to-transparent p-3 opacity-0 transition-opacity group-hover:opacity-100">
                     <span class="inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
                         <Eye class="h-3.5 w-3.5" /> Click to zoom
@@ -835,9 +905,10 @@ onBeforeUnmount(() => {
             </button>
             <img
                 v-if="asset.media_type === 'image'"
-                :src="asset.asset_url"
-                :alt="asset.prompt ?? 'Archived'"
+                :src="previewSrc ?? ''"
+                :alt="previewAlt"
                 class="max-h-[90vh] max-w-[90vw] rounded object-contain shadow-2xl"
+                data-testid="lightbox-img"
             />
             <video
                 v-else

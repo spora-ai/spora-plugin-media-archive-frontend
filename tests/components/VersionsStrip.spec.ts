@@ -88,9 +88,15 @@ function buildHost(opts?: {
     return { api, hostContext }
 }
 
-function mountStrip(asset: MediaAsset, harness: Harness) {
+function mountStrip(asset: MediaAsset, harness: Harness, overrides?: { selectedDerivativeId?: string }) {
     return mount(VersionsStrip, {
-        props: { asset, hostContext: harness.hostContext },
+        props: {
+            asset,
+            hostContext: harness.hostContext,
+            ...(overrides?.selectedDerivativeId !== undefined
+                ? { selectedDerivativeId: overrides.selectedDerivativeId }
+                : {}),
+        },
     })
 }
 
@@ -132,6 +138,39 @@ describe('VersionsStrip', () => {
         const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
         await chip.trigger('click')
         expect(wrapper.emitted('select')?.[0]?.[0]).toBe('derivative-9')
+        wrapper.unmount()
+    })
+
+    it('renders the server-supplied chip label when present, falling back to the upper-case format', async () => {
+        const labeled: MediaDerivative = { ...makeDerivative('format-png', 'derivative-png'), label: 'PNG' }
+        const unlabeled: MediaDerivative = makeDerivative('webp', 'derivative-webp')
+        const asset: MediaAsset = { ...baseAsset, derivatives: [labeled, unlabeled] }
+        const harness = buildHost({ options: [] })
+        const wrapper = mountStrip(asset, harness)
+        await flushPromises()
+
+        const chips = wrapper.findAll('[data-testid="versions-derivative-chip"]')
+        expect(chips).toHaveLength(2)
+        expect(chips[0]?.text()).toBe('PNG')
+        // No `label` field on the second derivative → fall back to
+        // upper-case format so older spora-core versions still render
+        // something readable.
+        expect(chips[1]?.text()).toBe('WEBP')
+        wrapper.unmount()
+    })
+
+    it('marks the chip whose media_id matches selectedDerivativeId as active', async () => {
+        const derivativeA = makeDerivative('pdf', 'derivative-a')
+        const derivativeB = makeDerivative('png', 'derivative-b')
+        const asset: MediaAsset = { ...baseAsset, derivatives: [derivativeA, derivativeB] }
+        const harness = buildHost({ options: [] })
+        const wrapper = mountStrip(asset, harness, { selectedDerivativeId: 'derivative-b' })
+        await flushPromises()
+        const chips = wrapper.findAll('[data-testid="versions-derivative-chip"]')
+        expect(chips[0]?.classes().join(' ')).not.toContain('bg-primary')
+        expect(chips[0]?.classes().join(' ')).not.toContain('text-primary-foreground')
+        expect(chips[1]?.classes().join(' ')).toContain('bg-primary')
+        expect(chips[1]?.classes().join(' ')).toContain('text-primary-foreground')
         wrapper.unmount()
     })
 

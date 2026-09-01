@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import MediaDetailPage from '../src/pages/MediaDetailPage.vue'
-import type { MediaAsset } from '../src/types'
+import type { MediaAsset, MediaDerivative } from '../src/types'
 import type { PluginHostContext } from '../src/shims'
 
 function buildHostContext(get: ReturnType<typeof vi.fn>): {
@@ -56,6 +56,19 @@ const sample: MediaAsset = {
 afterEach(() => {
     vi.restoreAllMocks()
 })
+
+function makeImageDerivative(overrides: Partial<MediaDerivative> = {}): MediaDerivative {
+    return {
+        format: 'thumbnail-256',
+        label: 'Thumb 256',
+        media_id: 'derivative-1',
+        asset_url: '/api/v1/assets/derivative-1.webp',
+        producer_plugin: 'spora-core',
+        producer_operation: 'image.derive',
+        created_at: '2026-01-01T00:00:01.000Z',
+        ...overrides,
+    }
+}
 
 describe('MediaDetailPage', () => {
     it('fetches the asset on mount and renders filename', async () => {
@@ -538,6 +551,43 @@ describe('MediaDetailPage', () => {
         const order = wrapper.html().indexOf('versions-strip')
         const previewOrder = wrapper.html().indexOf('media-preview-figure')
         expect(order).toBeLessThan(previewOrder)
+    })
+
+    it('swaps the preview to the chosen derivative when a chip is clicked', async () => {
+        const derivative = makeImageDerivative()
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, derivatives: [derivative] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        // The source asset is rendered by default.
+        const previewImg = wrapper.find('[data-testid="media-preview-img"]')
+        expect(previewImg.exists()).toBe(true)
+        expect(previewImg.attributes('src')).toBe(sample.asset_url)
+        // No "Viewing derivative" badge while the source is selected.
+        expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(false)
+
+        // Click the derivative chip.
+        const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
+        await chip.trigger('click')
+        await flushPromises()
+
+        // The preview now points at the derivative's asset_url.
+        const swapped = wrapper.find('[data-testid="media-preview-img"]')
+        expect(swapped.attributes('src')).toBe(derivative.asset_url)
+        // And the operator can see they've navigated off the source.
+        expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(true)
+
+        // Click the Source chip to come back.
+        const sourceChip = wrapper.find('[data-testid="versions-source"]')
+        await sourceChip.trigger('click')
+        await flushPromises()
+        const restored = wrapper.find('[data-testid="media-preview-img"]')
+        expect(restored.attributes('src')).toBe(sample.asset_url)
+        expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(false)
     })
 
     it('splices a freshly-produced derivative into asset.derivatives', async () => {
