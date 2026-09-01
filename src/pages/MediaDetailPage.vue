@@ -443,11 +443,15 @@ onBeforeUnmount(() => {
             <!-- Preview -->
             <figure
                 v-if="asset.media_type === 'image'"
-                class="group relative cursor-zoom-in overflow-hidden rounded-lg border border-border bg-muted"
+                class="group relative flex items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
                 data-testid="media-preview-figure"
                 @click="openLightbox"
             >
-                <img :src="asset.asset_url" :alt="asset.prompt ?? 'Archived'" class="h-auto w-full" />
+                <img
+                    :src="asset.asset_url"
+                    :alt="asset.prompt ?? 'Archived'"
+                    class="max-h-full max-w-full object-contain"
+                />
                 <div class="pointer-events-none absolute inset-0 flex items-end justify-end bg-gradient-to-t from-foreground/40 to-transparent p-3 opacity-0 transition-opacity group-hover:opacity-100">
                     <span class="inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
                         <Eye class="h-3.5 w-3.5" /> Click to zoom

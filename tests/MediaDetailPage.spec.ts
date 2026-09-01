@@ -194,6 +194,32 @@ describe('MediaDetailPage', () => {
         expect(wrapper.find('[data-testid="media-detail-filename"]').text()).toContain('two.png')
     })
 
+    it('centers the image preview and never forces it to upscale beyond its native size', async () => {
+        // Small icons / 64x64 thumbnails used to be stretched to the
+        // full container width via `h-auto w-full`, which produced a
+        // visibly blurred preview. The figure is now a flex container
+        // and the img caps itself at the figure's max dimensions.
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        const figure = wrapper.find('[data-testid="media-preview-figure"]')
+        expect(figure.exists()).toBe(true)
+        const figureClasses = figure.classes().join(' ')
+        expect(figureClasses).toContain('flex')
+        expect(figureClasses).toContain('items-center')
+        expect(figureClasses).toContain('justify-center')
+
+        const img = figure.find('img')
+        // Class array (not string) so `max-w-full` doesn't match `w-full`
+        // via string `.includes()` — that's a substring hit, not a token.
+        const imgClasses = img.classes()
+        expect(imgClasses).toContain('max-h-full')
+        expect(imgClasses).toContain('max-w-full')
+        expect(imgClasses).not.toContain('w-full')
+    })
+
     it('does not render a download link for non-image assets without a preview block', async () => {
         const get = vi.fn().mockResolvedValueOnce({ ...sample, media_type: 'audio', mime_type: 'audio/mpeg' })
         const { hostContext } = buildHostContext(get)
