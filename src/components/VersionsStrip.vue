@@ -74,7 +74,11 @@ const selectedDerivativeId = computed<string>(
 )
 
 function isSource(id: string): boolean {
-    return id === props.asset.id
+    // Parent sends the literal `'source'` sentinel when no derivative
+    // is selected (see MediaDetailPage's `selectedDerivativeId = ref('source')`);
+    // a future caller could pass `asset.id` directly. Match both so the
+    // Source chip lights up whichever way the parent signals source mode.
+    return id === 'source' || id === props.asset.id
 }
 
 async function refreshOptions(): Promise<void> {

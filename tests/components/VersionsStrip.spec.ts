@@ -174,6 +174,25 @@ describe('VersionsStrip', () => {
         wrapper.unmount()
     })
 
+    it('highlights the Source chip when the parent passes the literal "source" sentinel', async () => {
+        // MediaDetailPage initialises its ref with `ref<string>('source')`;
+        // the strip must recognise that as source-mode even though the
+        // strip's local computed only falls back to `asset.id` on
+        // `undefined`. Regression for the chip-never-highlights bug
+        // caught in light review.
+        const derivative = makeDerivative('pdf', 'derivative-1')
+        const asset: MediaAsset = { ...baseAsset, derivatives: [derivative] }
+        const harness = buildHost({ options: [] })
+        const wrapper = mountStrip(asset, harness, { selectedDerivativeId: 'source' })
+        await flushPromises()
+        const sourceChip = wrapper.find('[data-testid="versions-source"]')
+        expect(sourceChip.classes().join(' ')).toContain('bg-primary')
+        expect(sourceChip.classes().join(' ')).toContain('text-primary-foreground')
+        const derivativeChip = wrapper.find('[data-testid="versions-derivative-chip"]')
+        expect(derivativeChip.classes().join(' ')).not.toContain('bg-primary')
+        wrapper.unmount()
+    })
+
     it('lists every option returned by the options endpoint', async () => {
         const harness = buildHost({
             options: [

@@ -24,7 +24,7 @@ import type { MediaAsset } from '../types'
 import type { PluginHostContext } from '../shims'
 
 export interface DerivativeOption {
-    /** Format the producer emits (`pdf`, `png`, `jpeg`, `svg`, …). */
+    /** Format the producer emits — an open set keyed by each registered producer's `MediaDerivativeProducerInterface::supportedDerivativeFormats()`. */
     format: string
     /** Human-friendly label rendered in the dropdown. */
     label: string
