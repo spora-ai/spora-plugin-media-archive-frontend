@@ -249,7 +249,6 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <Teleport to="body">
     <dialog
         ref="dialogRef"
         class="fixed inset-0 z-50 m-0 flex h-full w-full max-w-none items-center justify-center bg-foreground/40 p-4 backdrop:bg-foreground/40"
@@ -261,104 +260,103 @@ onBeforeUnmount(() => {
             class="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-2xl"
             @click.stop
         >
-        <h2 id="upload-title" class="text-base font-semibold">Upload media</h2>
-        <p class="mt-1 text-xs text-muted-foreground">
-            Attribute the upload to one of your principals so it appears in
-            the right scope on the LIST endpoint.
-        </p>
-
-        <form class="mt-4 flex flex-col gap-3" data-testid="media-upload-form" @submit.prevent="submit">
-            <label
-                class="flex flex-col items-center justify-center gap-2 rounded border border-dashed border-border bg-muted/30 p-6 text-xs text-muted-foreground"
-                data-testid="upload-dropzone"
-                @drop="onDrop"
-                @dragover="onDragOver"
-            >
-                <Upload class="h-5 w-5" />
-                <span>Drag a file here, or pick one below</span>
-                <input
-                    type="file"
-                    class="block w-full text-xs text-foreground file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-primary-foreground"
-                    :accept="acceptAttr"
-                    data-testid="upload-file-input"
-                    @change="onFilePicked"
-                />
-                <span
-                    v-if="file"
-                    class="truncate text-foreground"
-                    data-testid="upload-filename"
-                >
-                    {{ file.name }} ({{ Math.round(file.size / 1024) }} KB)
-                </span>
-            </label>
-
-            <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                Principal
-                <select
-                    v-model.number="principalId"
-                    class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
-                    data-testid="upload-principal-select"
-                >
-                    <option
-                        v-for="opt in principalOptions"
-                        :key="opt.id"
-                        :value="opt.id"
-                    >
-                        {{ opt.label }}
-                    </option>
-                </select>
-            </label>
-
-            <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                Prompt (optional)
-                <input
-                    v-model="prompt"
-                    type="text"
-                    class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
-                    data-testid="upload-prompt-input"
-                />
-            </label>
-
-            <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                Tags (comma-separated, optional)
-                <input
-                    v-model="tags"
-                    type="text"
-                    class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
-                    data-testid="upload-tags-input"
-                />
-            </label>
-
-            <p
-                v-if="error"
-                class="rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
-                data-testid="upload-error"
-            >
-                {{ error }}
+            <h2 id="upload-title" class="text-base font-semibold">Upload media</h2>
+            <p class="mt-1 text-xs text-muted-foreground">
+                Attribute the upload to one of your principals so it appears in
+                the right scope on the LIST endpoint.
             </p>
 
-            <div class="flex justify-end gap-2 pt-2">
-                <button
-                    type="button"
-                    class="inline-flex items-center gap-1 rounded px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
-                    data-testid="upload-cancel"
-                    @click="close"
+            <form class="mt-4 flex flex-col gap-3" data-testid="media-upload-form" @submit.prevent="submit">
+                <label
+                    class="flex flex-col items-center justify-center gap-2 rounded border border-dashed border-border bg-muted/30 p-6 text-xs text-muted-foreground"
+                    data-testid="upload-dropzone"
+                    @drop="onDrop"
+                    @dragover="onDragOver"
                 >
-                    <X class="h-3.5 w-3.5" />
-                    Cancel
-                </button>
-                <button
-                    type="submit"
-                    :disabled="!canSubmit"
-                    class="inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                    data-testid="upload-submit"
+                    <Upload class="h-5 w-5" />
+                    <span>Drag a file here, or pick one below</span>
+                    <input
+                        type="file"
+                        class="block w-full text-xs text-foreground file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-primary-foreground"
+                        :accept="acceptAttr"
+                        data-testid="upload-file-input"
+                        @change="onFilePicked"
+                    />
+                    <span
+                        v-if="file"
+                        class="truncate text-foreground"
+                        data-testid="upload-filename"
+                    >
+                        {{ file.name }} ({{ Math.round(file.size / 1024) }} KB)
+                    </span>
+                </label>
+
+                <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Principal
+                    <select
+                        v-model.number="principalId"
+                        class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+                        data-testid="upload-principal-select"
+                    >
+                        <option
+                            v-for="opt in principalOptions"
+                            :key="opt.id"
+                            :value="opt.id"
+                        >
+                            {{ opt.label }}
+                        </option>
+                    </select>
+                </label>
+
+                <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Prompt (optional)
+                    <input
+                        v-model="prompt"
+                        type="text"
+                        class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+                        data-testid="upload-prompt-input"
+                    />
+                </label>
+
+                <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Tags (comma-separated, optional)
+                    <input
+                        v-model="tags"
+                        type="text"
+                        class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+                        data-testid="upload-tags-input"
+                    />
+                </label>
+
+                <p
+                    v-if="error"
+                    class="rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+                    data-testid="upload-error"
                 >
-                    <Upload class="h-3.5 w-3.5" />
-                    {{ uploading ? 'Uploading…' : 'Upload' }}
-                </button>
-            </div>
-        </form>
+                    {{ error }}
+                </p>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                        data-testid="upload-cancel"
+                        @click="close"
+                    >
+                        <X class="h-3.5 w-3.5" />
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        :disabled="!canSubmit"
+                        class="inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                        data-testid="upload-submit"
+                    >
+                        <Upload class="h-3.5 w-3.5" />
+                        {{ uploading ? 'Uploading…' : 'Upload' }}
+                    </button>
+                </div>
+            </form>
         </div>
     </dialog>
-    </Teleport>
 </template>
