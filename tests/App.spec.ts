@@ -541,8 +541,9 @@ describe('App.vue', () => {
 
         await button.trigger('click')
         await flushPromises()
-        // Clicking opens the upload dialog.
-        expect(wrapper.find('[data-testid="media-upload-dialog"]').exists()).toBe(true)
+        // The dialog teleports to <body> for fixed-position centring,
+        // so query the live document, not the wrapper.
+        expect(document.querySelector('[data-testid="media-upload-dialog"]')).toBeTruthy()
     })
 
     it('disables the Upload button when no principals are visible', async () => {

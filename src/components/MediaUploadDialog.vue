@@ -249,13 +249,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+    <Teleport to="body">
     <dialog
         ref="dialogRef"
-        class="rounded-lg p-6 backdrop:bg-foreground/40"
+        class="fixed inset-0 z-50 m-0 flex h-full w-full max-w-none items-center justify-center bg-foreground/40 p-4 backdrop:bg-foreground/40"
         aria-labelledby="upload-title"
         data-testid="media-upload-dialog"
         @cancel.prevent="close"
     >
+        <div
+            class="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-2xl"
+            @click.stop
+        >
         <h2 id="upload-title" class="text-base font-semibold">Upload media</h2>
         <p class="mt-1 text-xs text-muted-foreground">
             Attribute the upload to one of your principals so it appears in
@@ -353,5 +358,7 @@ onBeforeUnmount(() => {
                 </button>
             </div>
         </form>
+        </div>
     </dialog>
+    </Teleport>
 </template>
