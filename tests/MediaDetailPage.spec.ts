@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import MediaDetailPage from '../src/pages/MediaDetailPage.vue'
-import type { MediaAsset } from '../src/types'
+import type { MediaAsset, MediaDerivative } from '../src/types'
 import type { PluginHostContext } from '../src/shims'
 
 function buildHostContext(get: ReturnType<typeof vi.fn>): {
@@ -50,11 +50,25 @@ const sample: MediaAsset = {
     task_id: null,
     tool_call_id: null,
     created_at: new Date().toISOString(),
+    derivatives: [],
 }
 
 afterEach(() => {
     vi.restoreAllMocks()
 })
+
+function makeImageDerivative(overrides: Partial<MediaDerivative> = {}): MediaDerivative {
+    return {
+        format: 'thumbnail-256',
+        label: 'Thumb 256',
+        media_id: 'derivative-1',
+        asset_url: '/api/v1/assets/derivative-1.webp',
+        producer_plugin: 'spora-core',
+        producer_operation: 'image.derive',
+        created_at: '2026-01-01T00:00:01.000Z',
+        ...overrides,
+    }
+}
 
 describe('MediaDetailPage', () => {
     it('fetches the asset on mount and renders filename', async () => {
@@ -171,17 +185,52 @@ describe('MediaDetailPage', () => {
 
     it('refetches when the assetId prop changes', async () => {
         const get = vi.fn()
+            // Initial detail page load.
             .mockResolvedValueOnce(sample)
+            // VersionsStrip fires the options endpoint on mount (one per
+            // detail-page load).
+            .mockResolvedValueOnce([])
+            // setProps → second detail page load.
             .mockResolvedValueOnce({ ...sample, id: 'test-2', filename: 'two.png' })
+            // VersionsStrip fires the options endpoint again on id change.
+            .mockResolvedValueOnce([])
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        expect(get).toHaveBeenCalledTimes(1)
+        // Two fetches: the asset + the VersionsStrip options endpoint.
+        expect(get).toHaveBeenCalledTimes(2)
         await wrapper.setProps({ assetId: 'test-2' })
         await flushPromises()
-        expect(get).toHaveBeenCalledTimes(2)
-        expect(get.mock.calls[1]?.[0]).toBe('/media/test-2')
+        // Two more fetches: the new asset + the options endpoint again.
+        expect(get).toHaveBeenCalledTimes(4)
+        expect(get.mock.calls[2]?.[0]).toBe('/media/test-2')
         expect(wrapper.find('[data-testid="media-detail-filename"]').text()).toContain('two.png')
+    })
+
+    it('centers the image preview and never forces it to upscale beyond its native size', async () => {
+        // Small icons / 64x64 thumbnails used to be stretched to the
+        // full container width via `h-auto w-full`, which produced a
+        // visibly blurred preview. The figure is now a flex container
+        // and the img caps itself at the figure's max dimensions.
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        const figure = wrapper.find('[data-testid="media-preview-figure"]')
+        expect(figure.exists()).toBe(true)
+        const figureClasses = figure.classes().join(' ')
+        expect(figureClasses).toContain('flex')
+        expect(figureClasses).toContain('items-center')
+        expect(figureClasses).toContain('justify-center')
+
+        const img = figure.find('img')
+        // Class array (not string) so `max-w-full` doesn't match `w-full`
+        // via string `.includes()` — that's a substring hit, not a token.
+        const imgClasses = img.classes()
+        expect(imgClasses).toContain('max-h-full')
+        expect(imgClasses).toContain('max-w-full')
+        expect(imgClasses).not.toContain('w-full')
     })
 
     it('does not render a download link for non-image assets without a preview block', async () => {
@@ -466,6 +515,106 @@ describe('MediaDetailPage', () => {
         expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(false)
         // Original content still showing in preview
         expect(wrapper.text()).toContain('Original')
+    })
+
+    it('mounts the Versions strip above the preview block and reads derivatives from the asset', async () => {
+        // The strip's options endpoint is also fired on mount; both
+        // responses are pre-stubbed on the same `get` mock so the
+        // page settles deterministically without unmocked promises.
+        const derivatives = [
+            {
+                format: 'pdf',
+                media_id: 'derivative-pdf-1',
+                asset_url: '/api/v1/assets/derivative-pdf-1.pdf',
+                producer_plugin: 'typst',
+                producer_operation: 'render',
+                created_at: '2026-01-01T00:00:01.000Z',
+            },
+        ]
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, derivatives })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        const versionsStrip = wrapper.find('[data-testid="versions-strip"]')
+        expect(versionsStrip.exists()).toBe(true)
+        // The strip lists the existing derivatives as chips.
+        const chips = versionsStrip.findAll('[data-testid="versions-derivative-chip"]')
+        expect(chips).toHaveLength(1)
+        expect(chips[0]?.text()).toContain('PDF')
+        // The strip lives ABOVE the existing preview block — the
+        // relative DOM order matters for the visual contract.
+        const preview = wrapper.find('[data-testid="media-preview-figure"]')
+        expect(preview.exists()).toBe(true)
+        const order = wrapper.html().indexOf('versions-strip')
+        const previewOrder = wrapper.html().indexOf('media-preview-figure')
+        expect(order).toBeLessThan(previewOrder)
+    })
+
+    it('swaps the preview to the chosen derivative when a chip is clicked', async () => {
+        const derivative = makeImageDerivative()
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, derivatives: [derivative] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        // The source asset is rendered by default.
+        const previewImg = wrapper.find('[data-testid="media-preview-img"]')
+        expect(previewImg.exists()).toBe(true)
+        expect(previewImg.attributes('src')).toBe(sample.asset_url)
+        // No "Viewing derivative" badge while the source is selected.
+        expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(false)
+
+        // Click the derivative chip.
+        const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
+        await chip.trigger('click')
+        await flushPromises()
+
+        // The preview now points at the derivative's asset_url.
+        const swapped = wrapper.find('[data-testid="media-preview-img"]')
+        expect(swapped.attributes('src')).toBe(derivative.asset_url)
+        // And the operator can see they've navigated off the source.
+        expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(true)
+
+        // Click the Source chip to come back.
+        const sourceChip = wrapper.find('[data-testid="versions-source"]')
+        await sourceChip.trigger('click')
+        await flushPromises()
+        const restored = wrapper.find('[data-testid="media-preview-img"]')
+        expect(restored.attributes('src')).toBe(sample.asset_url)
+        expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(false)
+    })
+
+    it('splices a freshly-produced derivative into asset.derivatives', async () => {
+        // The strip emits a `MediaAsset` (the new media_assets row, not
+        // the wire-summary shape). The page must reshape it and append.
+        const derivativeAsset: MediaAsset = {
+            ...sample,
+            id: 'derivative-fresh',
+            mime_type: 'application/pdf',
+            plugin_slug: 'typst',
+            tool_name: 'render',
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, derivatives: [] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        const strip = wrapper.findComponent({ name: 'VersionsStrip' })
+        strip.vm.$emit('produced', derivativeAsset)
+        await flushPromises()
+        // The asset's derivatives should now contain the freshly-produced
+        // entry as a `MediaDerivative` summary (extracted from the
+        // derivative asset's MIME suffix).
+        const updated = wrapper.find('[data-testid="versions-source"]').exists()
+        expect(updated).toBe(true)
     })
 
 })

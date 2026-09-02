@@ -23,6 +23,30 @@ const sizeKb = computed(() => {
     if (props.asset.byte_size < 1024 * 1024) return `${Math.round(props.asset.byte_size / 1024)} KB`
     return `${(props.asset.byte_size / 1024 / 1024).toFixed(1)} MB`
 })
+
+/**
+ * One chip per distinct `format` already produced for this asset.
+ * The card never deduplicates by `(format, producer)` — a Typst PDF
+ * and an image-converter PDF render different bytes, and the operator
+ * cares which is which. The card opts for the simpler "one chip per
+ * format" affordance; the detail page's `VersionsStrip` is where the
+ * per-producer choice lives.
+ */
+interface DerivativeChip {
+    format: string
+    count: number
+}
+
+const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
+    const counts = new Map<string, number>()
+    for (const d of props.asset.derivatives ?? []) {
+        counts.set(d.format, (counts.get(d.format) ?? 0) + 1)
+    }
+    return Array.from(counts.entries()).map(([format, count]) => ({
+        format,
+        count,
+    }))
+})
 </script>
 
 <template>
@@ -64,5 +88,20 @@ const sizeKb = computed(() => {
         <p v-if="asset.prompt" class="line-clamp-2 text-xs text-muted-foreground">
             {{ asset.prompt }}
         </p>
+        <div
+            v-if="derivativeChips.length > 0"
+            class="flex flex-wrap gap-1"
+            data-testid="media-card-derivatives"
+        >
+            <span
+                v-for="chip in derivativeChips"
+                :key="chip.format"
+                class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
+                :data-format="chip.format"
+                data-testid="media-card-derivative-chip"
+            >
+                {{ chip.format }}<span v-if="chip.count > 1">×{{ chip.count }}</span>
+            </span>
+        </div>
     </button>
 </template>

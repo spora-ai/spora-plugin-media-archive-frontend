@@ -26,6 +26,7 @@ const sample: MediaAsset = {
     task_id: null,
     tool_call_id: null,
     created_at: new Date().toISOString(),
+    derivatives: [],
 }
 
 describe('MediaGrid', () => {
@@ -43,6 +44,12 @@ describe('MediaGrid', () => {
         const wrapper = mount(MediaGrid, { props: { assets: [sample] } })
         await wrapper.find(`[data-testid="media-card-${sample.id}"]`).trigger('click')
         expect(wrapper.emitted('select')?.[0]?.[0]).toMatchObject({ id: 'test-1' })
+    })
+
+    it('emits `upload-click` from the empty-state CTA', async () => {
+        const wrapper = mount(MediaGrid, { props: { assets: [] } })
+        await wrapper.find('[data-testid="media-grid-upload-cta"]').trigger('click')
+        expect(wrapper.emitted('upload-click')).toBeDefined()
     })
 })
 
@@ -199,5 +206,28 @@ describe('MediaCard', () => {
         const big: MediaAsset = { ...sample, byte_size: 5 * 1024 * 1024 }
         const wrapper = mount(MediaCard, { props: { asset: big } })
         expect(wrapper.text()).toContain('5.0 MB')
+    })
+
+    it('renders one chip per unique derivative format, with a count badge for duplicates', () => {
+        const derived: MediaAsset = {
+            ...sample,
+            derivatives: [
+                { format: 'pdf', media_id: 'd1', asset_url: '/u/d1.pdf', producer_plugin: 'typst', producer_operation: 'render', created_at: null },
+                { format: 'pdf', media_id: 'd2', asset_url: '/u/d2.pdf', producer_plugin: 'image-conv', producer_operation: 'render', created_at: null },
+                { format: 'png', media_id: 'd3', asset_url: '/u/d3.png', producer_plugin: 'image-conv', producer_operation: 'render', created_at: null },
+            ],
+        }
+        const wrapper = mount(MediaCard, { props: { asset: derived } })
+        const chips = wrapper.findAll('[data-testid="media-card-derivative-chip"]')
+        expect(chips).toHaveLength(2)
+        const pdfChip = chips.find((c) => c.attributes('data-format') === 'pdf')
+        expect(pdfChip?.text()).toContain('×2')
+        const pngChip = chips.find((c) => c.attributes('data-format') === 'png')
+        expect(pngChip?.text()).not.toContain('×')
+    })
+
+    it('omits derivative chips when derivatives is empty', () => {
+        const wrapper = mount(MediaCard, { props: { asset: { ...sample, derivatives: [] } } })
+        expect(wrapper.find('[data-testid="media-card-derivatives"]').exists()).toBe(false)
     })
 })

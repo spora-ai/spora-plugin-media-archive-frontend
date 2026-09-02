@@ -35,6 +35,14 @@ export interface PluginHostContext {
     api: {
         get: <T = unknown>(path: string) => Promise<T>
         post: <T = unknown>(path: string, body: unknown) => Promise<T>
+        /**
+         * Multipart upload helper. Sends a `FormData` payload with the
+         * correct `multipart/form-data` boundary and skips the
+         * JSON-body Content-Type the regular `post()` would set. The
+         * Media Archive plugin uses it for the principal-first
+         * upload flow (see `MediaUploadDialog.vue`).
+         */
+        postForm: <T = unknown>(path: string, body: FormData) => Promise<T>
         patch: <T = unknown>(path: string, body: unknown) => Promise<T>
         delete: <T = unknown>(path: string) => Promise<T>
     }
