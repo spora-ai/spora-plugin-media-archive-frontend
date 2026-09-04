@@ -658,12 +658,19 @@ describe('MediaDetailPage', () => {
         // a "click to zoom" hint); PDFs use the iframe directly.
         expect(wrapper.find('[data-testid="media-preview-figure"]').exists()).toBe(false)
 
-        // Click Source to come back — the iframe disappears, the
-        // document-source fallback renders.
+        // Click Source to come back — the iframe disappears and the
+        // text-type source chip fetches its raw bytes. The
+        // `textSourceLoading`/`textSourceError`/`<pre>` branches
+        // each have their own test below; here we just verify the
+        // iframe is gone and the source-side preview surface is up.
         await wrapper.find('[data-testid="versions-source"]').trigger('click')
         await flushPromises()
         expect(wrapper.find('[data-testid="media-preview-iframe"]').exists()).toBe(false)
-        expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(true)
+        // The text preview element is now mounted (its loading
+        // branch shows because `fetch` isn't mocked in this
+        // test). `media-preview-text` lives on the `<pre>` wrapper
+        // regardless of which inner `<code>` branch renders.
+        expect(wrapper.find('[data-testid="media-preview-text"]').exists()).toBe(true)
     })
 
     it('renders an image derivative as <img> on a document-type source', async () => {
@@ -696,6 +703,121 @@ describe('MediaDetailPage', () => {
         const img = wrapper.find('[data-testid="media-preview-img"]')
         expect(img.exists()).toBe(true)
         expect(img.attributes('src')).toBe(pngDerivative.asset_url)
+    })
+
+    it('renders the source bytes in a <pre> when the source mime_type starts with text/', async () => {
+        // Regression: the Source chip on a `.typ` source previously
+        // landed on the "Preview unavailable for document" fallback
+        // because `media_type === 'document'` doesn't distinguish
+        // PDFs from text. The fix also reads `mime_type` so anything
+        // with a `text/*` prefix gets fetched and rendered as text.
+        const fetchMock = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve('= Hello Typst\n$x = 1$\n'),
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'text/x-typst',
+                derivatives: [],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        await flushPromises()
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            sample.asset_url,
+            expect.objectContaining({ credentials: 'include' }),
+        )
+        const pre = wrapper.find('[data-testid="media-preview-text"]')
+        expect(pre.exists()).toBe(true)
+        // `<pre>` collapses a trailing newline, so compare against
+        // the source body without it.
+        expect(pre.find('[data-testid="media-preview-text-body"]').text()).toBe(
+            '= Hello Typst\n$x = 1$',
+        )
+
+        vi.unstubAllGlobals()
+    })
+
+    it('falls back to a destructive error message when the text fetch fails', async () => {
+        const fetchMock = vi.fn().mockRejectedValueOnce(new Error('network down'))
+        vi.stubGlobal('fetch', fetchMock)
+
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'text/plain',
+                derivatives: [],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        await flushPromises()
+
+        const err = wrapper.find('[data-testid="media-preview-text-error"]')
+        expect(err.exists()).toBe(true)
+        expect(err.text()).toContain('network down')
+
+        vi.unstubAllGlobals()
+    })
+
+    it('treats text/plain and text/markdown as text-preview sources too', async () => {
+        // The mime-type branch is general — anything with a text/*
+        // prefix is a text preview. Verify the breadth so future
+        // additions (text/csv, text/xml) Just Work.
+        for (const mimeType of ['text/plain', 'text/markdown', 'text/x-typst']) {
+            vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                text: () => Promise.resolve(`source for ${mimeType}`),
+            }))
+
+            const get = vi.fn()
+                .mockResolvedValueOnce({ ...sample, media_type: 'document', mime_type: mimeType, derivatives: [] })
+                .mockResolvedValueOnce([])
+            const { hostContext } = buildHostContext(get)
+            const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+            await flushPromises()
+            await flushPromises()
+            await flushPromises()
+
+            const body = wrapper.find('[data-testid="media-preview-text-body"]')
+            expect(body.exists()).toBe(true)
+            expect(body.text()).toBe(`source for ${mimeType}`)
+
+            vi.unstubAllGlobals()
+        }
+    })
+
+    it('still shows the "Preview unavailable for document" fallback for non-text documents like PDF', async () => {
+        // A PDF source (mime_type: application/pdf) is a document
+        // but NOT a text/* — the new text-preview branch must skip
+        // it. The fallback message should still surface.
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'application/pdf',
+                derivatives: [],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-preview-text"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(true)
     })
 
 })

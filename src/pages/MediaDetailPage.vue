@@ -115,20 +115,21 @@ const previewAlt = computed<string>(() => {
 /**
  * What element to render in the preview pane. Branches on the
  * SELECTED derivative's format when one is active, else on the
- * source asset's media_type. The previous implementation only
- * branched on `asset.media_type`, which meant a `.typ` source with a
- * freshly-produced PDF derivative rendered the wrong branch — the
- * `<img>` only existed inside `v-if="media_type === 'image'"`, so the
- * chip click silently changed `selectedDerivativeId` without
+ * source asset's media_type + mime_type. The previous implementation
+ * only branched on `asset.media_type`, which meant a `.typ` source
+ * with a freshly-produced PDF derivative rendered the wrong branch —
+ * the `<img>` only existed inside `v-if="media_type === 'image'"`,
+ * so the chip click silently changed `selectedDerivativeId` without
  * updating the DOM. Now the chip click on any format swap lands on
- * an element that can render it (PDF → iframe, raster → img).
+ * an element that can render it (PDF → iframe, raster → img,
+ * text source → fetched `<pre>`).
  */
-const previewKind = computed<'image' | 'pdf' | 'video' | 'audio' | 'unsupported'>(() => {
+const previewKind = computed<'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'>(() => {
     if (asset.value === null) return 'unsupported'
     if (selectedDerivative.value !== null) {
         return kindForFormat(selectedDerivative.value.format)
     }
-    return kindForMediaType(asset.value.media_type)
+    return kindForMediaType(asset.value.media_type, asset.value.mime_type)
 })
 
 /**
@@ -157,10 +158,19 @@ function kindForFormat(format: string): 'image' | 'pdf' | 'unsupported' {
     return 'unsupported'
 }
 
-function kindForMediaType(mediaType: string): 'image' | 'video' | 'audio' | 'unsupported' {
+/**
+ * Source-asset branch. The `media_type` enum doesn't carry enough
+ * resolution for `document` (which can be PDF, JSON, CSV, plain
+ * text, or `text/x-typst`), so we also read `mime_type`: anything
+ * with a `text/*` prefix is treated as a text source so the source
+ * chip renders the raw bytes in a `<pre>` block instead of the gray
+ * "Preview unavailable for document" fallback.
+ */
+function kindForMediaType(mediaType: string, mimeType: string | null): 'image' | 'video' | 'audio' | 'text' | 'unsupported' {
     if (mediaType === 'image') return 'image'
     if (mediaType === 'video') return 'video'
     if (mediaType === 'audio') return 'audio'
+    if (mediaType === 'document' && mimeType !== null && mimeType.startsWith('text/')) return 'text'
     return 'unsupported'
 }
 
@@ -168,6 +178,58 @@ const lightboxRef = ref<HTMLDialogElement | null>(null)
 const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
 const toast = ref<string | null>(null)
+
+/**
+ * Text-source preview state. Source bytes are fetched on demand
+ * (when the operator clicks the Source chip on a `text/*` asset)
+ * rather than eagerly on mount so we don't pay the fetch cost for
+ * every detail page open — most of the time the operator lands
+ * here via a chip click on a PDF derivative, not the source.
+ *
+ * The fetch goes through the browser's native `fetch()` because
+ * the host API client always parses responses as JSON; raw bytes
+ * need to bypass that wrapper. The asset endpoint is authenticated
+ * via session cookie, so `credentials: 'include'` is enough.
+ */
+const textSource = ref<string | null>(null)
+const textSourceLoading = ref(false)
+const textSourceError = ref<string | null>(null)
+
+async function loadTextSource(): Promise<void> {
+    if (asset.value === null || asset.value.asset_url === '') return
+    textSourceLoading.value = true
+    textSourceError.value = null
+    try {
+        const response = await fetch(asset.value.asset_url, { credentials: 'include' })
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`)
+        }
+        textSource.value = await response.text()
+    } catch (e) {
+        textSourceError.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        textSourceLoading.value = false
+    }
+}
+
+// Reset the cached source on navigation; the watcher below refills
+// when the operator clicks the Source chip on the new asset.
+watch(() => props.assetId, () => {
+    textSource.value = null
+    textSourceError.value = null
+})
+
+// Auto-fetch on the first time the operator lands on the Source chip
+// of a text-type asset. The watcher is `immediate` so a deep-link to
+// the detail page works without an intermediate chip click; the
+// "fetch only when needed" property is preserved because the watch
+// is gated on `previewKind === 'text'` rather than running on every
+// mount.
+watch(() => previewKind.value, (kind) => {
+    if (kind === 'text' && textSource.value === null && !textSourceLoading.value) {
+        void loadTextSource()
+    }
+}, { immediate: true })
 
 const editingField = ref<string | null>(null)
 const editValue = ref<string>('')
@@ -619,6 +681,19 @@ onBeforeUnmount(() => {
                 :src="previewSrc ?? ''"
                 data-testid="media-page-audio"
             />
+            <pre
+                v-else-if="previewKind === 'text'"
+                class="max-h-[80vh] overflow-auto rounded-lg border border-border bg-muted p-4 text-xs font-mono leading-relaxed text-foreground"
+                data-testid="media-preview-text"
+            ><code v-if="textSource !== null" data-testid="media-preview-text-body">{{ textSource }}</code><code
+                v-else-if="textSourceLoading"
+                class="text-muted-foreground"
+                data-testid="media-preview-text-loading"
+            >Loading source…</code><code
+                v-else-if="textSourceError"
+                class="text-destructive"
+                data-testid="media-preview-text-error"
+            >Couldn't load source: {{ textSourceError }}</code></pre>
             <div
                 v-else
                 class="flex aspect-video items-center justify-center rounded-lg border border-dashed border-border bg-muted text-sm text-muted-foreground"
