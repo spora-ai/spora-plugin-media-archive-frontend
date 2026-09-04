@@ -105,6 +105,15 @@ const scopeLoading = ref(false)
 const total = ref(0)
 
 /**
+ * `lastPage` is read from the most recent `MediaListResponse` so the
+ * "Load more" button can disable itself when no more pages remain. The
+ * controller already computes it server-side; we just cache it.
+ */
+const lastPage = ref(1)
+
+const loadingMore = ref(false)
+
+/**
  * Upload dialog state. The header button flips this open; the dialog's
  * `defaultPrincipalId` snaps from `selectedScope` so the upload lands
  * in the same scope the operator was already browsing. Subsequent
@@ -144,13 +153,24 @@ function principalIdsForRequest(): number[] {
     return visiblePrincipals.value.map((p) => p.id)
 }
 
-async function load(): Promise<void> {
+/**
+ * Fetch a single page and either replace the grid (initial load /
+ * filter change) or append the new rows (Load more). The two callers
+ * differ only in how they reconcile `assets` and which loading flag
+ * they toggle; everything else — URL building, request-id guarding,
+ * error handling — is shared here.
+ */
+async function fetchPage(page: number, mode: 'replace' | 'append'): Promise<void> {
     const myId = ++requestId
-    loading.value = true
+    if (mode === 'replace') {
+        loading.value = true
+    } else {
+        loadingMore.value = true
+    }
     error.value = null
     try {
         const params = new URLSearchParams()
-        params.set('page', String(query.value.page ?? 1))
+        params.set('page', String(page))
         params.set('per_page', String(query.value.perPage ?? 24))
         if (query.value.mediaType) params.set('type', query.value.mediaType)
         if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
@@ -171,16 +191,44 @@ async function load(): Promise<void> {
             `/media?${params.toString()}`,
         )
         if (myId !== requestId) return
-        assets.value = response.assets
+        if (mode === 'replace') {
+            assets.value = response.assets
+        } else {
+            // Deduplicate by id — the controller's pagination is
+            // best-effort and a concurrent insert can land the same
+            // row on consecutive pages.
+            const existing = new Set(assets.value.map((a) => a.id))
+            const fresh = response.assets.filter((a) => !existing.has(a.id))
+            assets.value = assets.value.concat(fresh)
+        }
         total.value = response.total
+        lastPage.value = response.lastPage
+        query.value = { ...query.value, page }
     } catch (e) {
         if (myId !== requestId) return
         error.value = e instanceof Error ? e.message : String(e)
     } finally {
         if (myId === requestId) {
-            loading.value = false
+            if (mode === 'replace') {
+                loading.value = false
+            } else {
+                loadingMore.value = false
+            }
         }
     }
+}
+
+async function load(): Promise<void> {
+    await fetchPage(query.value.page ?? 1, 'replace')
+}
+
+const canLoadMore = computed(() =>
+    !loading.value && !loadingMore.value && (query.value.page ?? 1) < lastPage.value,
+)
+
+async function loadMore(): Promise<void> {
+    if (!canLoadMore.value) return
+    await fetchPage((query.value.page ?? 1) + 1, 'append')
 }
 
 /**
@@ -381,7 +429,31 @@ onBeforeUnmount(() => {
             <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
                 Failed to load media: {{ error }}
             </div>
-            <MediaGrid v-else :assets="assets" @select="select" @upload-click="openUploadDialog" />
+            <template v-else>
+                <MediaGrid :assets="assets" @select="select" @upload-click="openUploadDialog" />
+                <div
+                    v-if="assets.length > 0 && (canLoadMore || loadingMore)"
+                    class="flex flex-col items-center gap-2 pt-2"
+                    data-testid="media-load-more"
+                >
+                    <button
+                        type="button"
+                        :disabled="!canLoadMore"
+                        class="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                        data-testid="media-load-more-button"
+                        @click="loadMore"
+                    >
+                        <span
+                            v-if="loadingMore"
+                            class="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
+                        />
+                        {{ loadingMore ? 'Loading…' : 'Load more' }}
+                    </button>
+                    <p class="text-xs text-muted-foreground" data-testid="media-load-more-meta">
+                        Showing {{ assets.length }} of {{ total }}
+                    </p>
+                </div>
+            </template>
 
             <MediaUploadDialog
                 v-if="uploadDialogOpen"

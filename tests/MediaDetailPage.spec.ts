@@ -617,4 +617,85 @@ describe('MediaDetailPage', () => {
         expect(updated).toBe(true)
     })
 
+    it('renders a PDF derivative in an iframe even when the source asset is a document', async () => {
+        // Regression: previously the preview pane only rendered an <img>
+        // for image-type sources; a freshly-produced PDF derivative on a
+        // `.typ` source silently no-op'd because the click changed
+        // `selectedDerivativeId` but the template's `v-if` branch never
+        // matched. The fix branches on the SELECTED derivative's format.
+        const pdfDerivative: MediaDerivative = {
+            format: 'pdf',
+            label: 'PDF',
+            media_id: 'derivative-pdf-1',
+            asset_url: '/api/v1/assets/derivative-pdf-1.pdf',
+            producer_plugin: 'spora-plugin-typst',
+            producer_operation: 'render',
+            created_at: '2026-01-01T00:00:01.000Z',
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'text/x-typst',
+                derivatives: [pdfDerivative],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        // Source branch should NOT match (no <img> for a document).
+        expect(wrapper.find('[data-testid="media-preview-figure"]').exists()).toBe(false)
+        // Click the PDF chip — the iframe should appear with the derivative's URL.
+        const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
+        await chip.trigger('click')
+        await flushPromises()
+        const iframe = wrapper.find('[data-testid="media-preview-iframe"]')
+        expect(iframe.exists()).toBe(true)
+        expect(iframe.attributes('src')).toBe(pdfDerivative.asset_url)
+        // The badge is scoped to the <img> branch only (it doubles as
+        // a "click to zoom" hint); PDFs use the iframe directly.
+        expect(wrapper.find('[data-testid="media-preview-figure"]').exists()).toBe(false)
+
+        // Click Source to come back — the iframe disappears, the
+        // document-source fallback renders.
+        await wrapper.find('[data-testid="versions-source"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-preview-iframe"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(true)
+    })
+
+    it('renders an image derivative as <img> on a document-type source', async () => {
+        // PNG/SVG derivatives on a `.typ` source should still land in
+        // the <img> branch — image preview is the universal fallback.
+        const pngDerivative: MediaDerivative = {
+            format: 'png',
+            label: 'PNG',
+            media_id: 'derivative-png-1',
+            asset_url: '/api/v1/assets/derivative-png-1.png',
+            producer_plugin: 'spora-plugin-typst',
+            producer_operation: 'render',
+            created_at: '2026-01-01T00:00:01.000Z',
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'text/x-typst',
+                derivatives: [pngDerivative],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
+        await chip.trigger('click')
+        await flushPromises()
+        const img = wrapper.find('[data-testid="media-preview-img"]')
+        expect(img.exists()).toBe(true)
+        expect(img.attributes('src')).toBe(pngDerivative.asset_url)
+    })
+
 })

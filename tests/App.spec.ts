@@ -557,4 +557,136 @@ describe('App.vue', () => {
         // must NOT be able to open the upload surface.
         expect(button.attributes('disabled')).toBeDefined()
     })
+
+    it('renders a Load more button when more pages remain, and hides it on the last page', async () => {
+        const page1: MediaListResponse = {
+            assets: [sample],
+            page: 1,
+            perPage: 24,
+            total: 48,
+            lastPage: 2,
+        }
+        const page2: MediaListResponse = {
+            assets: [{ ...sample, id: 'test-2' }],
+            page: 2,
+            perPage: 24,
+            total: 48,
+            lastPage: 2,
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce(page1)
+            .mockResolvedValueOnce(page2)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        // Page 1 loaded → button visible, total = 48, currentPage < lastPage.
+        expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-load-more-meta"]').text()).toContain('Showing 1 of 48')
+
+        // Click Load more → page 2 loaded, appended.
+        await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        // Count the cards by their `media-card-<id>` testid; the
+        // `media-card-filename` / `media-card-derivative-*` inner
+        // elements also match the broader prefix and would inflate
+        // the count, so we filter to the asset-id-shaped ones only.
+        const cardTestIds = wrapper.findAll('[data-testid^="media-card-"]')
+            .map((c) => c.attributes('data-testid') ?? '')
+            .filter((id) => /^media-card-[a-z0-9-]+$/.test(id) && id !== 'media-card-filename')
+        expect(cardTestIds).toHaveLength(2)
+        expect(cardTestIds).toContain('media-card-test-1')
+        expect(cardTestIds).toContain('media-card-test-2')
+        expect(get.mock.calls.at(-1)?.[0]).toContain('page=2')
+
+        // No more pages → button is gone (and so is the meta line that
+        // rides under it; both render together as a `v-if` group).
+        expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-load-more-meta"]').exists()).toBe(false)
+    })
+
+    it('does not render a Load more button when the first page is the last page', async () => {
+        const singlePage: MediaListResponse = {
+            assets: [sample],
+            page: 1,
+            perPage: 24,
+            total: 1,
+            lastPage: 1,
+        }
+        const get = vi.fn().mockResolvedValueOnce(singlePage)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(false)
+    })
+
+    it('deduplicates rows when a concurrent insert lands the same id on consecutive pages', async () => {
+        // Operator just produced a derivative and the LIST endpoint's
+        // `lastPage` was computed BEFORE the insert. Page 2's slice
+        // overlaps page 1 by one row (the new derivative's parent).
+        const shared = { ...sample, id: 'shared-id' }
+        const page1: MediaListResponse = {
+            assets: [sample, shared],
+            page: 1,
+            perPage: 24,
+            total: 25,
+            lastPage: 2,
+        }
+        const page2: MediaListResponse = {
+            assets: [shared, { ...sample, id: 'test-3' }],
+            page: 2,
+            perPage: 24,
+            total: 25,
+            lastPage: 2,
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce(page1)
+            .mockResolvedValueOnce(page2)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        const cardTestIds = wrapper.findAll('[data-testid^="media-card-"]')
+            .map((c) => c.attributes('data-testid') ?? '')
+            .filter((id) => /^media-card-[a-z0-9-]+$/.test(id) && id !== 'media-card-filename')
+        // `shared-id` must appear exactly once even though both pages returned it.
+        expect(cardTestIds).toHaveLength(3)
+        expect(cardTestIds.filter((id) => id === 'media-card-shared-id')).toHaveLength(1)
+    })
+
+    it('resets pagination when a filter changes so Load more starts fresh from page 1', async () => {
+        const first: MediaListResponse = {
+            assets: [sample, { ...sample, id: 'test-2' }],
+            page: 1,
+            perPage: 24,
+            total: 50,
+            lastPage: 3,
+        }
+        const afterFilter: MediaListResponse = {
+            assets: [sample],
+            page: 1,
+            perPage: 24,
+            total: 1,
+            lastPage: 1,
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce(first)
+            .mockResolvedValueOnce(afterFilter)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(true)
+        // Change filter — the next /media call must be page=1 (the
+        // setters reset it explicitly) and the Load more button must
+        // disappear because lastPage drops back to 1.
+        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        expect(get.mock.calls.at(-1)?.[0]).toContain('page=1')
+        expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(false)
+    })
 })

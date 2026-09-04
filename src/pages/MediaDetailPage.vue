@@ -112,6 +112,58 @@ const previewAlt = computed<string>(() => {
         : base
 })
 
+/**
+ * What element to render in the preview pane. Branches on the
+ * SELECTED derivative's format when one is active, else on the
+ * source asset's media_type. The previous implementation only
+ * branched on `asset.media_type`, which meant a `.typ` source with a
+ * freshly-produced PDF derivative rendered the wrong branch — the
+ * `<img>` only existed inside `v-if="media_type === 'image'"`, so the
+ * chip click silently changed `selectedDerivativeId` without
+ * updating the DOM. Now the chip click on any format swap lands on
+ * an element that can render it (PDF → iframe, raster → img).
+ */
+const previewKind = computed<'image' | 'pdf' | 'video' | 'audio' | 'unsupported'>(() => {
+    if (asset.value === null) return 'unsupported'
+    if (selectedDerivative.value !== null) {
+        return kindForFormat(selectedDerivative.value.format)
+    }
+    return kindForMediaType(asset.value.media_type)
+})
+
+/**
+ * Image-like derivative formats the browser can decode inline. The
+ * concrete raster extension list is small; the core resize/convert
+ * presets ship as `thumbnail-*`, `medium-*`, `format-*` (see
+ * `ImageDerivativeFormat::FORMAT_PRESETS`) and all of those output
+ * raster bytes, so we accept any `format-*|thumbnail-*|medium-*`
+ * prefix as image too.
+ */
+const PDF_FORMATS = new Set(['pdf'])
+
+function kindForFormat(format: string): 'image' | 'pdf' | 'unsupported' {
+    const f = format.toLowerCase()
+    if (PDF_FORMATS.has(f)) return 'pdf'
+    if (f.startsWith('thumbnail-')) return 'image'
+    if (f.startsWith('medium-')) return 'image'
+    if (f.startsWith('format-')) return 'image'
+    // Concrete raster extensions from any image producer (core's
+    // ImageDerivativeFormat catalogue AND TypstRenderProducer's pdf/png/svg
+    // output AND any future plugin that registers an image-format derivative).
+    if (f === 'svg' || f === 'png' || f === 'jpg' || f === 'jpeg'
+        || f === 'webp' || f === 'gif' || f === 'avif' || f === 'bmp') {
+        return 'image'
+    }
+    return 'unsupported'
+}
+
+function kindForMediaType(mediaType: string): 'image' | 'video' | 'audio' | 'unsupported' {
+    if (mediaType === 'image') return 'image'
+    if (mediaType === 'video') return 'video'
+    if (mediaType === 'audio') return 'audio'
+    return 'unsupported'
+}
+
 const lightboxRef = ref<HTMLDialogElement | null>(null)
 const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
@@ -194,8 +246,10 @@ function goBack(): void {
 }
 
 function openLightbox(): void {
-    if (asset.value === null) return
-    if (asset.value.media_type === 'image' || asset.value.media_type === 'video') {
+    // Lightbox only makes sense for image/video — PDFs use the
+    // iframe directly. Image derivatives on a non-image source
+    // (rare but possible) still open the lightbox via previewKind.
+    if (previewKind.value === 'image' || previewKind.value === 'video') {
         lightboxOpen.value = true
     }
 }
@@ -502,9 +556,13 @@ onBeforeUnmount(() => {
                 @select="onDerivativeSelected"
                 @produced="onDerivativeProduced"
             />
-            <!-- Preview -->
+            <!-- Preview — branches on `previewKind` (which itself
+                 branches on the SELECTED derivative's format when one
+                 is active) so a PDF derivative on a `.typ` source
+                 renders in an <iframe>, not the document-source
+                 fallback. -->
             <figure
-                v-if="asset.media_type === 'image'"
+                v-if="previewKind === 'image'"
                 class="group relative flex items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
                 data-testid="media-preview-figure"
                 @click="openLightbox"
@@ -528,13 +586,21 @@ onBeforeUnmount(() => {
                     </span>
                 </div>
             </figure>
+            <iframe
+                v-else-if="previewKind === 'pdf'"
+                :src="previewSrc ?? ''"
+                :title="previewAlt"
+                class="w-full rounded-lg border border-border bg-muted"
+                style="height: 80vh;"
+                data-testid="media-preview-iframe"
+            />
             <video
-                v-else-if="asset.media_type === 'video'"
+                v-else-if="previewKind === 'video'"
                 controls
                 muted
                 playsinline
                 class="w-full cursor-zoom-in rounded-lg border border-border"
-                :src="asset.asset_url"
+                :src="previewSrc ?? ''"
                 data-testid="media-page-video"
                 @click="openLightbox"
             >
@@ -547,17 +613,18 @@ onBeforeUnmount(() => {
                 />
             </video>
             <audio
-                v-else-if="asset.media_type === 'audio'"
+                v-else-if="previewKind === 'audio'"
                 controls
                 class="w-full"
-                :src="asset.asset_url"
+                :src="previewSrc ?? ''"
                 data-testid="media-page-audio"
             />
             <div
                 v-else
                 class="flex aspect-video items-center justify-center rounded-lg border border-dashed border-border bg-muted text-sm text-muted-foreground"
+                data-testid="media-preview-fallback"
             >
-                Preview unavailable for {{ asset.media_type }}
+                Preview unavailable for {{ selectedDerivative !== null ? selectedDerivative.format : asset.media_type }}
             </div>
 
             <!-- Primary actions -->
@@ -884,7 +951,7 @@ onBeforeUnmount(() => {
 
         <!-- Lightbox dialog -->
         <dialog
-            v-if="lightboxOpen && asset && (asset.media_type === 'image' || asset.media_type === 'video')"
+            v-if="lightboxOpen && asset && (previewKind === 'image' || previewKind === 'video')"
             ref="lightboxRef"
             class="fixed inset-0 z-50 m-0 flex h-full w-full max-w-none items-center justify-center bg-foreground/80 p-4 backdrop:bg-foreground/80"
             aria-modal="true"
@@ -904,7 +971,7 @@ onBeforeUnmount(() => {
                 <X class="h-5 w-5" />
             </button>
             <img
-                v-if="asset.media_type === 'image'"
+                v-if="previewKind === 'image'"
                 :src="previewSrc ?? ''"
                 :alt="previewAlt"
                 class="max-h-[90vh] max-w-[90vw] rounded object-contain shadow-2xl"
@@ -915,7 +982,7 @@ onBeforeUnmount(() => {
                 controls
                 muted
                 playsinline
-                :src="asset.asset_url"
+                :src="previewSrc ?? ''"
                 class="max-h-[90vh] max-w-[90vw] rounded shadow-2xl"
                 data-testid="lightbox-video"
             >
