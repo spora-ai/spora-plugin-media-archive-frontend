@@ -42,6 +42,9 @@ import './style.css'
 /** `null` is the "ALL" pick — see `MediaListQuery` for the semantics. */
 type SelectedScope = number | null
 
+/** `fetchPage()` reconcile mode — replace the grid or append a page. */
+type LoadMode = 'replace' | 'append'
+
 const props = defineProps<{ hostContext: PluginHostContext }>()
 
 const api = computed(() => props.hostContext.api)
@@ -155,52 +158,22 @@ function principalIdsForRequest(): number[] {
 
 /**
  * Fetch a single page and either replace the grid (initial load /
- * filter change) or append the new rows (Load more). The two callers
- * differ only in how they reconcile `assets` and which loading flag
- * they toggle; everything else — URL building, request-id guarding,
- * error handling — is shared here.
+ * filter change) or append the new rows (Load more). The body is the
+ * shared lifecycle (request-id guard, error capture, loading-flag
+ * toggle); the per-mode work — URL building and asset reconciliation
+ * — lives in `buildPageParams()` and `reconcileAssets()` so this
+ * function stays under Sonar's cognitive-complexity threshold.
  */
-async function fetchPage(page: number, mode: 'replace' | 'append'): Promise<void> {
+async function fetchPage(page: number, mode: LoadMode): Promise<void> {
     const myId = ++requestId
-    if (mode === 'replace') {
-        loading.value = true
-    } else {
-        loadingMore.value = true
-    }
+    setLoadingFlag(mode, true)
     error.value = null
     try {
-        const params = new URLSearchParams()
-        params.set('page', String(page))
-        params.set('per_page', String(query.value.perPage ?? 24))
-        if (query.value.mediaType) params.set('type', query.value.mediaType)
-        if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
-        if (query.value.search) params.set('search', query.value.search)
-        for (const id of principalIdsForRequest()) {
-            // Use the `principal_id[]` array form so PHP's `parse_str`
-            // (which Symfony uses internally) preserves every value.
-            // The plain `principal_id=` form collapses repeated scalar
-            // keys to the LAST one — meaning the `ALL` chip (which
-            // sends user-principal + every group-principal) silently
-            // dropped everything except the last group, so the user's
-            // own media (owned by the user-principal id) never surfaced.
-            // The controller reads `principal_id` regardless of the
-            // `[]` suffix because PHP strips it during parsing.
-            params.append('principal_id[]', String(id))
-        }
         const response = await api.value.get<MediaListResponse>(
-            `/media?${params.toString()}`,
+            `/media?${buildPageParams(page).toString()}`,
         )
         if (myId !== requestId) return
-        if (mode === 'replace') {
-            assets.value = response.assets
-        } else {
-            // Deduplicate by id — the controller's pagination is
-            // best-effort and a concurrent insert can land the same
-            // row on consecutive pages.
-            const existing = new Set(assets.value.map((a) => a.id))
-            const fresh = response.assets.filter((a) => !existing.has(a.id))
-            assets.value = assets.value.concat(fresh)
-        }
+        reconcileAssets(response, mode)
         total.value = response.total
         lastPage.value = response.lastPage
         query.value = { ...query.value, page }
@@ -209,12 +182,65 @@ async function fetchPage(page: number, mode: 'replace' | 'append'): Promise<void
         error.value = e instanceof Error ? e.message : String(e)
     } finally {
         if (myId === requestId) {
-            if (mode === 'replace') {
-                loading.value = false
-            } else {
-                loadingMore.value = false
-            }
+            setLoadingFlag(mode, false)
         }
+    }
+}
+
+/**
+ * Build the `/media?…` query string for the next request. Pulled out
+ * of `fetchPage` so the caller's request-id guard and error branch
+ * stay readable. The `principal_id[]` array form is required — see
+ * the comment on the `append()` call below.
+ */
+function buildPageParams(page: number): URLSearchParams {
+    const params = new URLSearchParams()
+    params.set('page', String(page))
+    params.set('per_page', String(query.value.perPage ?? 24))
+    if (query.value.mediaType) params.set('type', query.value.mediaType)
+    if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
+    if (query.value.search) params.set('search', query.value.search)
+    for (const id of principalIdsForRequest()) {
+        // Use the `principal_id[]` array form so PHP's `parse_str`
+        // (which Symfony uses internally) preserves every value.
+        // The plain `principal_id=` form collapses repeated scalar
+        // keys to the LAST one — meaning the `ALL` chip (which
+        // sends user-principal + every group-principal) silently
+        // dropped everything except the last group, so the user's
+        // own media (owned by the user-principal id) never surfaced.
+        // The controller reads `principal_id` regardless of the
+        // `[]` suffix because PHP strips it during parsing.
+        params.append('principal_id[]', String(id))
+    }
+    return params
+}
+
+/**
+ * Merge a fresh page into the grid. `replace` overwrites the list
+ * outright; `append` deduplicates by id against the rows we already
+ * hold — the controller's pagination is best-effort and a concurrent
+ * insert can land the same row on consecutive pages.
+ */
+function reconcileAssets(response: MediaListResponse, mode: LoadMode): void {
+    if (mode === 'replace') {
+        assets.value = response.assets
+        return
+    }
+    const existing = new Set(assets.value.map((a) => a.id))
+    const fresh = response.assets.filter((a) => !existing.has(a.id))
+    assets.value = assets.value.concat(fresh)
+}
+
+/**
+ * Toggle the matching loading indicator for the current mode —
+ * `replace` flips the full-screen `loading` flag; `append` flips
+ * `loadingMore` so the "Load more" button can show its own spinner.
+ */
+function setLoadingFlag(mode: LoadMode, value: boolean): void {
+    if (mode === 'replace') {
+        loading.value = value
+    } else {
+        loadingMore.value = value
     }
 }
 
