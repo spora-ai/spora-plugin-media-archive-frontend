@@ -6,6 +6,7 @@ import {
     Download,
     ExternalLink,
     Eye,
+    FileText,
     RefreshCw,
     Share2,
     Trash2,
@@ -621,8 +622,10 @@ onBeforeUnmount(() => {
             <!-- Preview — branches on `previewKind` (which itself
                  branches on the SELECTED derivative's format when one
                  is active) so a PDF derivative on a `.typ` source
-                 renders in an <iframe>, not the document-source
-                 fallback. -->
+                 lands on the PDF download card, not the document-source
+                 fallback. An <iframe> would be hijacked by the browser's
+                 built-in PDF viewer and trigger a download on click;
+                 the card surfaces the file and the action explicitly. -->
             <figure
                 v-if="previewKind === 'image'"
                 class="group relative flex items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
@@ -648,14 +651,23 @@ onBeforeUnmount(() => {
                     </span>
                 </div>
             </figure>
-            <iframe
+            <div
                 v-else-if="previewKind === 'pdf'"
-                :src="previewSrc ?? ''"
-                :title="previewAlt"
-                class="w-full rounded-lg border border-border bg-muted"
-                style="height: 80vh;"
-                data-testid="media-preview-iframe"
-            />
+                class="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-muted p-8 min-h-[200px] max-h-[80vh]"
+                data-testid="media-preview-pdf"
+            >
+                <FileText class="h-12 w-12 text-muted-foreground" />
+                <div class="text-sm font-medium text-foreground">{{ previewAlt }}</div>
+                <a
+                    :href="previewSrc ?? ''"
+                    :download="previewAlt"
+                    class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+                    data-testid="media-preview-pdf-download"
+                >
+                    <Download class="h-4 w-4" />
+                    Download PDF
+                </a>
+            </div>
             <video
                 v-else-if="previewKind === 'video'"
                 controls

@@ -617,12 +617,17 @@ describe('MediaDetailPage', () => {
         expect(updated).toBe(true)
     })
 
-    it('renders a PDF derivative in an iframe even when the source asset is a document', async () => {
+    it('renders a PDF derivative in a download card even when the source asset is a document', async () => {
         // Regression: previously the preview pane only rendered an <img>
         // for image-type sources; a freshly-produced PDF derivative on a
         // `.typ` source silently no-op'd because the click changed
         // `selectedDerivativeId` but the template's `v-if` branch never
         // matched. The fix branches on the SELECTED derivative's format.
+        //
+        // UX follow-up: rendering the PDF in an <iframe> triggered the
+        // browser's built-in PDF viewer, which downloads the file when
+        // the operator clicks. The PDF branch now surfaces a download
+        // card (filename + button) instead.
         const pdfDerivative: MediaDerivative = {
             format: 'pdf',
             label: 'PDF',
@@ -647,29 +652,33 @@ describe('MediaDetailPage', () => {
 
         // Source branch should NOT match (no <img> for a document).
         expect(wrapper.find('[data-testid="media-preview-figure"]').exists()).toBe(false)
-        // Click the PDF chip — the iframe should appear with the derivative's URL.
+        // Click the PDF chip — the download card appears and the (now
+        // removed) iframe branch does not.
         const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
         await chip.trigger('click')
         await flushPromises()
-        const iframe = wrapper.find('[data-testid="media-preview-iframe"]')
-        expect(iframe.exists()).toBe(true)
-        expect(iframe.attributes('src')).toBe(pdfDerivative.asset_url)
+        const card = wrapper.find('[data-testid="media-preview-pdf"]')
+        expect(card.exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-preview-iframe"]').exists()).toBe(false)
+        const download = wrapper.find('[data-testid="media-preview-pdf-download"]')
+        expect(download.exists()).toBe(true)
+        expect(download.attributes('href')).toBe(pdfDerivative.asset_url)
+        expect(download.attributes('download')).toBeTruthy()
         // The badge is scoped to the <img> branch only (it doubles as
-        // a "click to zoom" hint); PDFs use the iframe directly.
+        // a "click to zoom" hint); PDFs use the download card directly.
         expect(wrapper.find('[data-testid="media-preview-figure"]').exists()).toBe(false)
 
-        // Click Source to come back — the iframe disappears and the
-        // text-type source chip fetches its raw bytes. The
-        // `textSourceLoading`/`textSourceError`/`<pre>` branches
-        // each have their own test below; here we just verify the
-        // iframe is gone and the source-side preview surface is up.
+        // Click Source to come back — the download card disappears and
+        // the text-type source chip fetches its raw bytes. The
+        // `textSourceLoading`/`textSourceError`/<pre> branches each
+        // have their own test below; here we just verify the download
+        // card is gone and the source-side preview surface is up.
         await wrapper.find('[data-testid="versions-source"]').trigger('click')
         await flushPromises()
+        expect(wrapper.find('[data-testid="media-preview-pdf"]').exists()).toBe(false)
         expect(wrapper.find('[data-testid="media-preview-iframe"]').exists()).toBe(false)
-        // The text preview element is now mounted (its loading
-        // branch shows because `fetch` isn't mocked in this
-        // test). `media-preview-text` lives on the `<pre>` wrapper
-        // regardless of which inner `<code>` branch renders.
+        // The text preview element is now mounted (its loading branch
+        // shows because `fetch` isn't mocked in this test).
         expect(wrapper.find('[data-testid="media-preview-text"]').exists()).toBe(true)
     })
 
