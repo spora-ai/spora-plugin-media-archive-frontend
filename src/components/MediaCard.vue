@@ -60,7 +60,7 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
                 v-if="isImage"
                 :src="asset.asset_url"
                 :alt="asset.prompt ?? 'Archived'"
-                class="h-full w-full object-cover"
+                class="h-full w-full object-contain bg-background"
                 loading="lazy"
             />
             <div v-else class="flex h-full w-full items-center justify-center text-muted-foreground">

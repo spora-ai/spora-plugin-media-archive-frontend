@@ -6,6 +6,7 @@ import {
     Download,
     ExternalLink,
     Eye,
+    FileText,
     RefreshCw,
     Share2,
     Trash2,
@@ -112,10 +113,124 @@ const previewAlt = computed<string>(() => {
         : base
 })
 
+/**
+ * What element to render in the preview pane. Branches on the
+ * SELECTED derivative's format when one is active, else on the
+ * source asset's media_type + mime_type. The previous implementation
+ * only branched on `asset.media_type`, which meant a `.typ` source
+ * with a freshly-produced PDF derivative rendered the wrong branch —
+ * the `<img>` only existed inside `v-if="media_type === 'image'"`,
+ * so the chip click silently changed `selectedDerivativeId` without
+ * updating the DOM. Now the chip click on any format swap lands on
+ * an element that can render it (PDF → iframe, raster → img,
+ * text source → fetched `<pre>`).
+ */
+const previewKind = computed<'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'>(() => {
+    if (asset.value === null) return 'unsupported'
+    if (selectedDerivative.value !== null) {
+        return kindForFormat(selectedDerivative.value.format)
+    }
+    return kindForMediaType(asset.value.media_type, asset.value.mime_type)
+})
+
+/**
+ * Image-like derivative formats the browser can decode inline. The
+ * concrete raster extension list is small; the core resize/convert
+ * presets ship as `thumbnail-*`, `medium-*`, `format-*` (see
+ * `ImageDerivativeFormat::FORMAT_PRESETS`) and all of those output
+ * raster bytes, so we accept any `format-*|thumbnail-*|medium-*`
+ * prefix as image too.
+ */
+const PDF_FORMATS = new Set(['pdf'])
+
+function kindForFormat(format: string): 'image' | 'pdf' | 'unsupported' {
+    const f = format.toLowerCase()
+    if (PDF_FORMATS.has(f)) return 'pdf'
+    if (f.startsWith('thumbnail-')) return 'image'
+    if (f.startsWith('medium-')) return 'image'
+    if (f.startsWith('format-')) return 'image'
+    // Concrete raster extensions from any image producer (core's
+    // ImageDerivativeFormat catalogue AND TypstRenderProducer's pdf/png/svg
+    // output AND any future plugin that registers an image-format derivative).
+    if (f === 'svg' || f === 'png' || f === 'jpg' || f === 'jpeg'
+        || f === 'webp' || f === 'gif' || f === 'avif' || f === 'bmp') {
+        return 'image'
+    }
+    return 'unsupported'
+}
+
+/**
+ * Source-asset branch. The `media_type` enum doesn't carry enough
+ * resolution for `document` (which can be PDF, JSON, CSV, plain
+ * text, or `text/x-typst`), so we also read `mime_type`: anything
+ * with a `text/*` prefix is treated as a text source so the source
+ * chip renders the raw bytes in a `<pre>` block instead of the gray
+ * "Preview unavailable for document" fallback.
+ */
+function kindForMediaType(mediaType: string, mimeType: string | null): 'image' | 'video' | 'audio' | 'text' | 'unsupported' {
+    if (mediaType === 'image') return 'image'
+    if (mediaType === 'video') return 'video'
+    if (mediaType === 'audio') return 'audio'
+    if (mediaType === 'document' && mimeType !== null && mimeType.startsWith('text/')) return 'text'
+    return 'unsupported'
+}
+
 const lightboxRef = ref<HTMLDialogElement | null>(null)
 const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
 const toast = ref<string | null>(null)
+
+/**
+ * Text-source preview state. Source bytes are fetched on demand
+ * (when the operator clicks the Source chip on a `text/*` asset)
+ * rather than eagerly on mount so we don't pay the fetch cost for
+ * every detail page open — most of the time the operator lands
+ * here via a chip click on a PDF derivative, not the source.
+ *
+ * The fetch goes through the browser's native `fetch()` because
+ * the host API client always parses responses as JSON; raw bytes
+ * need to bypass that wrapper. The asset endpoint is authenticated
+ * via session cookie, so `credentials: 'include'` is enough.
+ */
+const textSource = ref<string | null>(null)
+const textSourceLoading = ref(false)
+const textSourceError = ref<string | null>(null)
+
+async function loadTextSource(): Promise<void> {
+    if (asset.value === null || asset.value.asset_url === '') return
+    textSourceLoading.value = true
+    textSourceError.value = null
+    try {
+        const response = await fetch(asset.value.asset_url, { credentials: 'include' })
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`)
+        }
+        textSource.value = await response.text()
+    } catch (e) {
+        textSourceError.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        textSourceLoading.value = false
+    }
+}
+
+// Reset the cached source on navigation; the watcher below refills
+// when the operator clicks the Source chip on the new asset.
+watch(() => props.assetId, () => {
+    textSource.value = null
+    textSourceError.value = null
+})
+
+// Auto-fetch on the first time the operator lands on the Source chip
+// of a text-type asset. The watcher is `immediate` so a deep-link to
+// the detail page works without an intermediate chip click; the
+// "fetch only when needed" property is preserved because the watch
+// is gated on `previewKind === 'text'` rather than running on every
+// mount.
+watch(() => previewKind.value, (kind) => {
+    if (kind === 'text' && textSource.value === null && !textSourceLoading.value) {
+        void loadTextSource()
+    }
+}, { immediate: true })
 
 const editingField = ref<string | null>(null)
 const editValue = ref<string>('')
@@ -194,8 +309,10 @@ function goBack(): void {
 }
 
 function openLightbox(): void {
-    if (asset.value === null) return
-    if (asset.value.media_type === 'image' || asset.value.media_type === 'video') {
+    // Lightbox only makes sense for image/video — PDFs use the
+    // iframe directly. Image derivatives on a non-image source
+    // (rare but possible) still open the lightbox via previewKind.
+    if (previewKind.value === 'image' || previewKind.value === 'video') {
         lightboxOpen.value = true
     }
 }
@@ -502,9 +619,15 @@ onBeforeUnmount(() => {
                 @select="onDerivativeSelected"
                 @produced="onDerivativeProduced"
             />
-            <!-- Preview -->
+            <!-- Preview — branches on `previewKind` (which itself
+                 branches on the SELECTED derivative's format when one
+                 is active) so a PDF derivative on a `.typ` source
+                 lands on the PDF download card, not the document-source
+                 fallback. An <iframe> would be hijacked by the browser's
+                 built-in PDF viewer and trigger a download on click;
+                 the card surfaces the file and the action explicitly. -->
             <figure
-                v-if="asset.media_type === 'image'"
+                v-if="previewKind === 'image'"
                 class="group relative flex items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
                 data-testid="media-preview-figure"
                 @click="openLightbox"
@@ -528,13 +651,30 @@ onBeforeUnmount(() => {
                     </span>
                 </div>
             </figure>
+            <div
+                v-else-if="previewKind === 'pdf'"
+                class="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-muted p-8 min-h-[200px] max-h-[80vh]"
+                data-testid="media-preview-pdf"
+            >
+                <FileText class="h-12 w-12 text-muted-foreground" />
+                <div class="text-sm font-medium text-foreground">{{ previewAlt }}</div>
+                <a
+                    :href="previewSrc ?? ''"
+                    :download="previewAlt"
+                    class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+                    data-testid="media-preview-pdf-download"
+                >
+                    <Download class="h-4 w-4" />
+                    Download PDF
+                </a>
+            </div>
             <video
-                v-else-if="asset.media_type === 'video'"
+                v-else-if="previewKind === 'video'"
                 controls
                 muted
                 playsinline
                 class="w-full cursor-zoom-in rounded-lg border border-border"
-                :src="asset.asset_url"
+                :src="previewSrc ?? ''"
                 data-testid="media-page-video"
                 @click="openLightbox"
             >
@@ -547,17 +687,31 @@ onBeforeUnmount(() => {
                 />
             </video>
             <audio
-                v-else-if="asset.media_type === 'audio'"
+                v-else-if="previewKind === 'audio'"
                 controls
                 class="w-full"
-                :src="asset.asset_url"
+                :src="previewSrc ?? ''"
                 data-testid="media-page-audio"
             />
+            <pre
+                v-else-if="previewKind === 'text'"
+                class="max-h-[80vh] overflow-auto rounded-lg border border-border bg-muted p-4 text-xs font-mono leading-relaxed text-foreground"
+                data-testid="media-preview-text"
+            ><code v-if="textSource !== null" data-testid="media-preview-text-body">{{ textSource }}</code><code
+                v-else-if="textSourceLoading"
+                class="text-muted-foreground"
+                data-testid="media-preview-text-loading"
+            >Loading source…</code><code
+                v-else-if="textSourceError"
+                class="text-destructive"
+                data-testid="media-preview-text-error"
+            >Couldn't load source: {{ textSourceError }}</code></pre>
             <div
                 v-else
                 class="flex aspect-video items-center justify-center rounded-lg border border-dashed border-border bg-muted text-sm text-muted-foreground"
+                data-testid="media-preview-fallback"
             >
-                Preview unavailable for {{ asset.media_type }}
+                Preview unavailable for {{ selectedDerivative !== null ? selectedDerivative.format : asset.media_type }}
             </div>
 
             <!-- Primary actions -->
@@ -884,7 +1038,7 @@ onBeforeUnmount(() => {
 
         <!-- Lightbox dialog -->
         <dialog
-            v-if="lightboxOpen && asset && (asset.media_type === 'image' || asset.media_type === 'video')"
+            v-if="lightboxOpen && asset && (previewKind === 'image' || previewKind === 'video')"
             ref="lightboxRef"
             class="fixed inset-0 z-50 m-0 flex h-full w-full max-w-none items-center justify-center bg-foreground/80 p-4 backdrop:bg-foreground/80"
             aria-modal="true"
@@ -904,7 +1058,7 @@ onBeforeUnmount(() => {
                 <X class="h-5 w-5" />
             </button>
             <img
-                v-if="asset.media_type === 'image'"
+                v-if="previewKind === 'image'"
                 :src="previewSrc ?? ''"
                 :alt="previewAlt"
                 class="max-h-[90vh] max-w-[90vw] rounded object-contain shadow-2xl"
@@ -915,7 +1069,7 @@ onBeforeUnmount(() => {
                 controls
                 muted
                 playsinline
-                :src="asset.asset_url"
+                :src="previewSrc ?? ''"
                 class="max-h-[90vh] max-w-[90vw] rounded shadow-2xl"
                 data-testid="lightbox-video"
             >

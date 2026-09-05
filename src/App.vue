@@ -42,6 +42,9 @@ import './style.css'
 /** `null` is the "ALL" pick — see `MediaListQuery` for the semantics. */
 type SelectedScope = number | null
 
+/** `fetchPage()` reconcile mode — replace the grid or append a page. */
+type LoadMode = 'replace' | 'append'
+
 const props = defineProps<{ hostContext: PluginHostContext }>()
 
 const api = computed(() => props.hostContext.api)
@@ -105,6 +108,15 @@ const scopeLoading = ref(false)
 const total = ref(0)
 
 /**
+ * `lastPage` is read from the most recent `MediaListResponse` so the
+ * "Load more" button can disable itself when no more pages remain. The
+ * controller already computes it server-side; we just cache it.
+ */
+const lastPage = ref(1)
+
+const loadingMore = ref(false)
+
+/**
  * Upload dialog state. The header button flips this open; the dialog's
  * `defaultPrincipalId` snaps from `selectedScope` so the upload lands
  * in the same scope the operator was already browsing. Subsequent
@@ -144,43 +156,105 @@ function principalIdsForRequest(): number[] {
     return visiblePrincipals.value.map((p) => p.id)
 }
 
-async function load(): Promise<void> {
+/**
+ * Fetch a single page and either replace the grid (initial load /
+ * filter change) or append the new rows (Load more). The body is the
+ * shared lifecycle (request-id guard, error capture, loading-flag
+ * toggle); the per-mode work — URL building and asset reconciliation
+ * — lives in `buildPageParams()` and `reconcileAssets()` so this
+ * function stays under Sonar's cognitive-complexity threshold.
+ */
+async function fetchPage(page: number, mode: LoadMode): Promise<void> {
     const myId = ++requestId
-    loading.value = true
+    setLoadingFlag(mode, true)
     error.value = null
     try {
-        const params = new URLSearchParams()
-        params.set('page', String(query.value.page ?? 1))
-        params.set('per_page', String(query.value.perPage ?? 24))
-        if (query.value.mediaType) params.set('type', query.value.mediaType)
-        if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
-        if (query.value.search) params.set('search', query.value.search)
-        for (const id of principalIdsForRequest()) {
-            // Use the `principal_id[]` array form so PHP's `parse_str`
-            // (which Symfony uses internally) preserves every value.
-            // The plain `principal_id=` form collapses repeated scalar
-            // keys to the LAST one — meaning the `ALL` chip (which
-            // sends user-principal + every group-principal) silently
-            // dropped everything except the last group, so the user's
-            // own media (owned by the user-principal id) never surfaced.
-            // The controller reads `principal_id` regardless of the
-            // `[]` suffix because PHP strips it during parsing.
-            params.append('principal_id[]', String(id))
-        }
         const response = await api.value.get<MediaListResponse>(
-            `/media?${params.toString()}`,
+            `/media?${buildPageParams(page).toString()}`,
         )
         if (myId !== requestId) return
-        assets.value = response.assets
+        reconcileAssets(response, mode)
         total.value = response.total
+        lastPage.value = response.lastPage
+        query.value = { ...query.value, page }
     } catch (e) {
         if (myId !== requestId) return
         error.value = e instanceof Error ? e.message : String(e)
     } finally {
         if (myId === requestId) {
-            loading.value = false
+            setLoadingFlag(mode, false)
         }
     }
+}
+
+/**
+ * Build the `/media?…` query string for the next request. Pulled out
+ * of `fetchPage` so the caller's request-id guard and error branch
+ * stay readable. The `principal_id[]` array form is required — see
+ * the comment on the `append()` call below.
+ */
+function buildPageParams(page: number): URLSearchParams {
+    const params = new URLSearchParams()
+    params.set('page', String(page))
+    params.set('per_page', String(query.value.perPage ?? 24))
+    if (query.value.mediaType) params.set('type', query.value.mediaType)
+    if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
+    if (query.value.search) params.set('search', query.value.search)
+    for (const id of principalIdsForRequest()) {
+        // Use the `principal_id[]` array form so PHP's `parse_str`
+        // (which Symfony uses internally) preserves every value.
+        // The plain `principal_id=` form collapses repeated scalar
+        // keys to the LAST one — meaning the `ALL` chip (which
+        // sends user-principal + every group-principal) silently
+        // dropped everything except the last group, so the user's
+        // own media (owned by the user-principal id) never surfaced.
+        // The controller reads `principal_id` regardless of the
+        // `[]` suffix because PHP strips it during parsing.
+        params.append('principal_id[]', String(id))
+    }
+    return params
+}
+
+/**
+ * Merge a fresh page into the grid. `replace` overwrites the list
+ * outright; `append` deduplicates by id against the rows we already
+ * hold — the controller's pagination is best-effort and a concurrent
+ * insert can land the same row on consecutive pages.
+ */
+function reconcileAssets(response: MediaListResponse, mode: LoadMode): void {
+    if (mode === 'replace') {
+        assets.value = response.assets
+        return
+    }
+    const existing = new Set(assets.value.map((a) => a.id))
+    const fresh = response.assets.filter((a) => !existing.has(a.id))
+    assets.value = assets.value.concat(fresh)
+}
+
+/**
+ * Toggle the matching loading indicator for the current mode —
+ * `replace` flips the full-screen `loading` flag; `append` flips
+ * `loadingMore` so the "Load more" button can show its own spinner.
+ */
+function setLoadingFlag(mode: LoadMode, value: boolean): void {
+    if (mode === 'replace') {
+        loading.value = value
+    } else {
+        loadingMore.value = value
+    }
+}
+
+async function load(): Promise<void> {
+    await fetchPage(query.value.page ?? 1, 'replace')
+}
+
+const canLoadMore = computed(() =>
+    !loading.value && !loadingMore.value && (query.value.page ?? 1) < lastPage.value,
+)
+
+async function loadMore(): Promise<void> {
+    if (!canLoadMore.value) return
+    await fetchPage((query.value.page ?? 1) + 1, 'append')
 }
 
 /**
@@ -381,7 +455,31 @@ onBeforeUnmount(() => {
             <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
                 Failed to load media: {{ error }}
             </div>
-            <MediaGrid v-else :assets="assets" @select="select" @upload-click="openUploadDialog" />
+            <template v-else>
+                <MediaGrid :assets="assets" @select="select" @upload-click="openUploadDialog" />
+                <div
+                    v-if="assets.length > 0 && (canLoadMore || loadingMore)"
+                    class="flex flex-col items-center gap-2 pt-2"
+                    data-testid="media-load-more"
+                >
+                    <button
+                        type="button"
+                        :disabled="!canLoadMore"
+                        class="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                        data-testid="media-load-more-button"
+                        @click="loadMore"
+                    >
+                        <span
+                            v-if="loadingMore"
+                            class="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
+                        />
+                        {{ loadingMore ? 'Loading…' : 'Load more' }}
+                    </button>
+                    <p class="text-xs text-muted-foreground" data-testid="media-load-more-meta">
+                        Showing {{ assets.length }} of {{ total }}
+                    </p>
+                </div>
+            </template>
 
             <MediaUploadDialog
                 v-if="uploadDialogOpen"
