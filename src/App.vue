@@ -117,6 +117,15 @@ const lastPage = ref(1)
 const loadingMore = ref(false)
 
 /**
+ * Append-mode errors are surfaced inline (under the "Load more"
+ * button) rather than as a full-grid blocker — `assets.value` already
+ * holds the rows we successfully loaded, so a transient pagination
+ * failure shouldn't hide them. `error` stays reserved for replace-mode
+ * failures, which by definition mean we have no grid to show.
+ */
+const appendError = ref<string | null>(null)
+
+/**
  * Upload dialog state. The header button flips this open; the dialog's
  * `defaultPrincipalId` snaps from `selectedScope` so the upload lands
  * in the same scope the operator was already browsing. Subsequent
@@ -131,9 +140,10 @@ const isOnDetailPage = computed(() => activeAssetId.value !== null)
 /**
  * Monotonic `requestId` guard against stale responses from rapid filter
  * changes. When the user flips type/search/scope faster than the network
- * replies, only the latest result is allowed to update the grid. We also
- * flip `loading` off only for the latest request so the indicator does
- * not flicker between transitions.
+ * replies, only the latest result is allowed to update the grid. The
+ * `finally` block is intentionally NOT gated — see `fetchPage`'s
+ * docblock — because each mode owns a distinct indicator and resetting
+ * a superseded request's flag cannot collide with the latest one's.
  */
 let requestId = 0
 
@@ -158,16 +168,25 @@ function principalIdsForRequest(): number[] {
 
 /**
  * Fetch a single page and either replace the grid (initial load /
- * filter change) or append the new rows (Load more). The body is the
+ * filter change) or append a new page (Load more). The body is the
  * shared lifecycle (request-id guard, error capture, loading-flag
  * toggle); the per-mode work — URL building and asset reconciliation
  * — lives in `buildPageParams()` and `reconcileAssets()` so this
  * function stays under Sonar's cognitive-complexity threshold.
+ *
+ * The `finally` always clears the flag for THIS request's mode —
+ * never gated by `requestId`. A stale `finally` only ever touches the
+ * indicator belonging to its own mode (`loadingMore` for append,
+ * `loading` for replace), so resetting it cannot collide with the
+ * newer request's flag. Gating this block used to leave `loadingMore`
+ * stuck at `true` when a filter change kicked off a replace mid-Load-
+ * more — the append's `finally` was skipped and nothing else reset it.
  */
 async function fetchPage(page: number, mode: LoadMode): Promise<void> {
     const myId = ++requestId
     setLoadingFlag(mode, true)
     error.value = null
+    appendError.value = null
     try {
         const response = await api.value.get<MediaListResponse>(
             `/media?${buildPageParams(page).toString()}`,
@@ -179,11 +198,14 @@ async function fetchPage(page: number, mode: LoadMode): Promise<void> {
         query.value = { ...query.value, page }
     } catch (e) {
         if (myId !== requestId) return
-        error.value = e instanceof Error ? e.message : String(e)
-    } finally {
-        if (myId === requestId) {
-            setLoadingFlag(mode, false)
+        const message = e instanceof Error ? e.message : String(e)
+        if (mode === 'replace') {
+            error.value = message
+        } else {
+            appendError.value = message
         }
+    } finally {
+        setLoadingFlag(mode, false)
     }
 }
 
@@ -458,7 +480,7 @@ onBeforeUnmount(() => {
             <template v-else>
                 <MediaGrid :assets="assets" @select="select" @upload-click="openUploadDialog" />
                 <div
-                    v-if="assets.length > 0 && (canLoadMore || loadingMore)"
+                    v-if="assets.length > 0 && (canLoadMore || loadingMore || appendError)"
                     class="flex flex-col items-center gap-2 pt-2"
                     data-testid="media-load-more"
                 >
@@ -477,6 +499,13 @@ onBeforeUnmount(() => {
                     </button>
                     <p class="text-xs text-muted-foreground" data-testid="media-load-more-meta">
                         Showing {{ assets.length }} of {{ total }}
+                    </p>
+                    <p
+                        v-if="appendError"
+                        class="text-xs text-destructive"
+                        data-testid="media-load-more-error"
+                    >
+                        Couldn't load more: {{ appendError }}
                     </p>
                 </div>
             </template>
