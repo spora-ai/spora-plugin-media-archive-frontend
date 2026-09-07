@@ -689,4 +689,123 @@ describe('App.vue', () => {
         expect(get.mock.calls.at(-1)?.[0]).toContain('page=1')
         expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(false)
     })
+
+    it('surfaces a failed Load more as an inline error under the button without blanking the grid', async () => {
+        // Regression: a transient pagination failure shouldn't hide the
+        // rows we already loaded. Append-mode errors live on a separate
+        // ref (`appendError`) so the button + meta row can stay
+        // mounted and the operator can retry — the grid-level `error`
+        // would otherwise blank the entire view.
+        const page1: MediaListResponse = {
+            assets: [sample, { ...sample, id: 'test-2' }],
+            page: 1,
+            perPage: 24,
+            total: 48,
+            lastPage: 2,
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce(page1)
+            .mockRejectedValueOnce(new Error('network down'))
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        // The already-loaded rows must still be rendered — a failed
+        // append must never wipe the grid.
+        const cardTestIds = wrapper.findAll('[data-testid^="media-card-"]')
+            .map((c) => c.attributes('data-testid') ?? '')
+            .filter((id) => /^media-card-[a-z0-9-]+$/.test(id) && id !== 'media-card-filename')
+        expect(cardTestIds).toHaveLength(2)
+
+        // The inline error appears under the button via the dedicated
+        // testid; the full-grid blocker (which replaces the grid with a
+        // destructive banner) is NOT used for append failures.
+        const inlineError = wrapper.find('[data-testid="media-load-more-error"]')
+        expect(inlineError.exists()).toBe(true)
+        expect(inlineError.text()).toContain('Couldn\'t load more')
+        expect(inlineError.text()).toContain('network down')
+        expect(wrapper.text()).not.toContain('Failed to load media')
+
+        // Retry: clicking the button again kicks off a fresh append.
+        await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        expect(get).toHaveBeenCalledTimes(3)
+    })
+
+    it('clears loadingMore when a filter change kicks off a replace mid-Load-more', async () => {
+        // Regression: the append's `finally` was previously gated on
+        // `requestId`, so a filter change that bumped the id mid-append
+        // would skip the append's finally and leave `loadingMore` stuck
+        // at true — the Load more button looked permanently busy until
+        // the user reloaded. The fix ungates the finally because each
+        // mode owns its own indicator, so resetting a superseded
+        // append's flag cannot collide with the newer replace's flag.
+        vi.useRealTimers()
+        const page1: MediaListResponse = {
+            assets: [sample, { ...sample, id: 'test-2' }],
+            page: 1,
+            perPage: 24,
+            total: 48,
+            lastPage: 2,
+        }
+        let resolveAppend: ((v: MediaListResponse) => void) | null = null
+        const get = vi.fn()
+            .mockResolvedValueOnce(page1)
+            .mockReturnValueOnce(new Promise<MediaListResponse>((resolve) => {
+                resolveAppend = resolve
+            }))
+            // The replace keeps lastPage=2 (matching the initial load)
+            // so the Load more button stays mounted after the replace
+            // resolves — we need it to keep rendering so the
+            // `Loading…` vs `Load more` label is observable.
+            .mockResolvedValueOnce({
+                assets: [sample],
+                page: 1,
+                perPage: 24,
+                total: 48,
+                lastPage: 2,
+            })
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        // Kick off the append. loadingMore=true, button shows "Loading…".
+        await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
+        await flushPromises()
+        const midButton = wrapper.find('[data-testid="media-load-more-button"]')
+        expect(midButton.exists()).toBe(true)
+        expect(midButton.text()).toContain('Loading…')
+
+        // Mid-append: change the type filter — setType() calls load(),
+        // which bumps requestId and starts a replace.
+        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+        await flushPromises()
+
+        // Settle the superseded append. The (ungated) finally must run
+        // and clear loadingMore even though the requestId no longer
+        // matches.
+        ;(resolveAppend as unknown as ((v: MediaListResponse) => void) | null)?.({
+            assets: [{ ...sample, id: 'test-3' }, { ...sample, id: 'test-4' }],
+            page: 2,
+            perPage: 24,
+            total: 48,
+            lastPage: 2,
+        })
+        await flushPromises()
+
+        // The Load-more spinner is gone and the label is "Load more"
+        // again — the indicator that was stuck at true before the fix
+        // is no longer stuck. The button itself is still disabled
+        // because the replace's `loading` flag is true, which is a
+        // separate indicator and is correct.
+        const afterButton = wrapper.find('[data-testid="media-load-more-button"]')
+        expect(afterButton.exists()).toBe(true)
+        expect(afterButton.text()).not.toContain('Loading…')
+        expect(afterButton.text()).toContain('Load more')
+    })
 })

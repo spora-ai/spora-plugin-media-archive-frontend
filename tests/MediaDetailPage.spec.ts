@@ -829,4 +829,113 @@ describe('MediaDetailPage', () => {
         expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(true)
     })
 
+    it('discards a stale text-source fetch when the assetId changes mid-flight', async () => {
+        // Regression: the assetId-change watcher clears `textSource`,
+        // but a still-in-flight fetch from the PREVIOUS asset would
+        // race back in and overwrite the new asset's preview — its
+        // `myToken === loadToken` check would pass because the
+        // previous loadTextSource call set myToken BEFORE the watcher
+        // bumped loadToken. The fix bumps loadToken on every
+        // loadTextSource call AND inside the assetId watcher, so the
+        // stale response's guard trips and the body is dropped.
+        vi.useRealTimers()
+        let resolveOldFetch: ((response: Response) => void) | null = null
+        const fetchMock = vi.fn()
+            .mockReturnValueOnce(new Promise<Response>((resolve) => {
+                resolveOldFetch = resolve
+            }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        const textAsset1: MediaAsset = {
+            ...sample,
+            id: 'text-1',
+            media_type: 'document',
+            mime_type: 'text/plain',
+            asset_url: 'https://example.test/api/v1/media/text-1.bin',
+            derivatives: [],
+        }
+        const textAsset2: MediaAsset = {
+            ...sample,
+            id: 'text-2',
+            media_type: 'document',
+            mime_type: 'text/plain',
+            asset_url: 'https://example.test/api/v1/media/text-2.bin',
+            derivatives: [],
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce(textAsset1)
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce(textAsset2)
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: textAsset1.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        await flushPromises()
+        // The first fetch is in flight (loading state visible). Switch
+        // assets BEFORE it resolves — the watcher bumps loadToken so
+        // the OLD fetch's body is stale.
+        expect(wrapper.find('[data-testid="media-preview-text-loading"]').exists()).toBe(true)
+        await wrapper.setProps({ assetId: textAsset2.id })
+        await flushPromises()
+        // Settle the OLD fetch last. The stale-token guard must drop
+        // the body even though the assetId watcher reset textSource.
+        ;(resolveOldFetch as unknown as ((response: Response) => void) | null)?.({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            text: () => Promise.resolve('STALE body'),
+        } as unknown as Response)
+        await flushPromises()
+        await flushPromises()
+        // The STALE body must NEVER reach the rendered preview. Without
+        // the token bump in the watcher, the OLD fetch's `myToken ===
+        // loadToken` check would pass and overwrite textSource with
+        // 'STALE body' — the user would see the previous asset's
+        // bytes on the new asset's page.
+        const body = wrapper.find('[data-testid="media-preview-text-body"]')
+        expect(body.exists()).toBe(false)
+        const err = wrapper.find('[data-testid="media-preview-text-error"]')
+        expect(err.exists()).toBe(false)
+        expect(wrapper.text()).not.toContain('STALE')
+
+        vi.unstubAllGlobals()
+    })
+
+    it('surfaces the HTTP status when the text-source fetch returns a non-ok response', async () => {
+        // The existing failure test mocks a fetch rejection (network
+        // down), which hits the catch via the thrown rejection. The
+        // `!response.ok` branch is a separate path: a successful fetch
+        // whose response status is non-2xx — the try block throws
+        // explicitly with the HTTP message, then the catch sets
+        // textSourceError. Both error shapes must reach the user.
+        const fetchMock = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 404,
+            statusText: 'Not Found',
+            text: () => Promise.resolve(''),
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'text/plain',
+                derivatives: [],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        await flushPromises()
+
+        const err = wrapper.find('[data-testid="media-preview-text-error"]')
+        expect(err.exists()).toBe(true)
+        expect(err.text()).toContain('HTTP 404 Not Found')
+
+        vi.unstubAllGlobals()
+    })
+
 })
