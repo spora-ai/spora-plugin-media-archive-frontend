@@ -19,6 +19,15 @@ The detail drawer (right-side panel that opens when a card is selected) covers t
 - Safe external source link: only `http(s)` schemes render as anchors; `javascript:` and other schemes show an "Invalid source URL" hint instead.
 - Live region (`role="status"` + `aria-live="polite"`) announces sharing state and toast notifications to assistive tech.
 - All edit-save buttons disable while a save is in flight so the user cannot double-submit a conflicting PATCH.
+- PDF derivatives surface as a download card (filename + Download PDF button linking to the asset URL with a `download` attribute). The earlier `<iframe>` preview was removed because most browsers replace it with a built-in PDF viewer that triggers a download on stray clicks.
+- Text-type source assets (`mime_type` starting with `text/` — covers `text/plain`, `text/markdown`, `text/x-typst`, `text/csv`, etc.) render the raw bytes in a scrollable `<pre>` element fetched on demand from the asset URL with `credentials: 'include'`. The fetch is gated on the operator landing on the Source chip so derivative-first workflows don't pay the cost.
+- Image thumbnails on the grid use `object-contain` (was `object-cover`) so portrait derivatives (e.g. Typst A4 renders) fit within the square card without cropping; the letterbox background is the card's own background.
+
+## Grid pagination
+
+- The grid renders 24 rows per page; if the response carries `lastPage > 1` a 'Load more' button appears under the cards with a 'Showing N of total' counter.
+- Clicking appends the next page; rows are deduplicated by id against the existing rows so a concurrent insert landing the same row on consecutive pages doesn't render it twice.
+- Filter changes (type pill, search, scope chip) reset to page 1 — the Load-more button disappears when `lastPage` drops back to 1.
 
 ## Scope chip row
 

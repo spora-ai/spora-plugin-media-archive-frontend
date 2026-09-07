@@ -122,7 +122,7 @@ const previewAlt = computed<string>(() => {
  * the `<img>` only existed inside `v-if="media_type === 'image'"`,
  * so the chip click silently changed `selectedDerivativeId` without
  * updating the DOM. Now the chip click on any format swap lands on
- * an element that can render it (PDF → iframe, raster → img,
+ * an element that can render it (PDF → download card, raster → img,
  * text source → fetched `<pre>`).
  */
 const previewKind = computed<'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'>(() => {
@@ -196,26 +196,53 @@ const textSource = ref<string | null>(null)
 const textSourceLoading = ref(false)
 const textSourceError = ref<string | null>(null)
 
+/**
+ * Monotonic token for `loadTextSource` — guards against a stale fetch
+ * resolving after the operator has navigated to a different asset. The
+ * assetId-change watcher clears `textSource`, but if the prior fetch
+ * is still in flight when the new one starts, the bytes can race back
+ * in and overwrite the new asset's preview. Bumping `loadToken` on
+ * each call invalidates every in-flight load; the `finally` is also
+ * gated so the loading spinner only flips off for the still-current
+ * request — same pattern as App.vue's `requestId`.
+ */
+let loadToken = 0
+
 async function loadTextSource(): Promise<void> {
     if (asset.value === null || asset.value.asset_url === '') return
+    const myToken = ++loadToken
     textSourceLoading.value = true
     textSourceError.value = null
     try {
         const response = await fetch(asset.value.asset_url, { credentials: 'include' })
+        if (myToken !== loadToken) return
         if (!response.ok) {
             throw new Error(`HTTP ${response.status} ${response.statusText}`)
         }
-        textSource.value = await response.text()
+        const body = await response.text()
+        if (myToken !== loadToken) return
+        textSource.value = body
     } catch (e) {
+        if (myToken !== loadToken) return
         textSourceError.value = e instanceof Error ? e.message : String(e)
     } finally {
-        textSourceLoading.value = false
+        if (myToken === loadToken) {
+            textSourceLoading.value = false
+        }
     }
 }
 
 // Reset the cached source on navigation; the watcher below refills
-// when the operator clicks the Source chip on the new asset.
+// when the operator clicks the Source chip on the new asset. We also
+// bump `loadToken` here — without it, an in-flight fetch from the
+// PREVIOUS asset can resolve between this reset and the new
+// `loadTextSource()` call (the new call only fires after `loadAsset`
+// resolves and `previewKind` recomputes), and the stale body would
+// pass the token check (`myToken === loadToken`) and write the old
+// bytes into `textSource`. The token bump happens before the next
+// `loadTextSource` invocation, so the stale guard catches it.
 watch(() => props.assetId, () => {
+    loadToken++
     textSource.value = null
     textSourceError.value = null
 })
@@ -310,7 +337,7 @@ function goBack(): void {
 
 function openLightbox(): void {
     // Lightbox only makes sense for image/video — PDFs use the
-    // iframe directly. Image derivatives on a non-image source
+    // download card directly. Image derivatives on a non-image source
     // (rare but possible) still open the lightbox via previewKind.
     if (previewKind.value === 'image' || previewKind.value === 'video') {
         lightboxOpen.value = true
