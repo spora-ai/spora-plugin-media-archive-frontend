@@ -10,6 +10,7 @@ import type {
     MediaPrincipal,
 } from '../src/types'
 import type { PluginHostContext } from '../src/shims'
+import { __resetShowTemporaryToggleForTesting } from '../src/composables/useShowTemporaryToggle'
 
 type GetFn = <T = unknown>(path: string) => Promise<T>
 type MockedApi = {
@@ -144,10 +145,16 @@ function buildContext(
 describe('App.vue', () => {
     beforeEach(() => {
         vi.useFakeTimers()
+        // Reset the temporary-files toggle so its persisted state
+        // doesn't leak between tests (one test flips it on, the next
+        // asserts the default off — without this the singleton keeps
+        // the flipped value).
+        __resetShowTemporaryToggleForTesting()
     })
     afterEach(() => {
         vi.useRealTimers()
         vi.restoreAllMocks()
+        __resetShowTemporaryToggleForTesting()
     })
 
     it('renders the heading and total count after loading', async () => {
@@ -807,5 +814,79 @@ describe('App.vue', () => {
         expect(afterButton.exists()).toBe(true)
         expect(afterButton.text()).not.toContain('Loading…')
         expect(afterButton.text()).toContain('Load more')
+    })
+
+    it('sends include_temporary=false on the initial list call (toggle default off)', async () => {
+        // The query param is always emitted so the controller's
+        // default is overridden deterministically — operators who
+        // never open the toggle still see the non-temp rows.
+        const get = vi.fn().mockResolvedValueOnce(emptyList)
+        const helper = buildContext(get); mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        const url = get.mock.calls.find((c) => c[0]?.startsWith('/media'))?.[0] ?? ''
+        expect(url).toContain('include_temporary=false')
+    })
+
+    it('flipping the toggle reloads the grid with include_temporary=true', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(get).toHaveBeenCalledTimes(1)
+        expect(get.mock.calls[0]?.[0]).toContain('include_temporary=false')
+
+        // Click the toggle in MediaFilters — it mutates the shared
+        // singleton, which triggers App.vue's reload watcher.
+        await wrapper.find<HTMLInputElement>('[data-testid="media-show-temporary"]').setValue(true)
+        await flushPromises()
+        await flushPromises()
+        expect(get).toHaveBeenCalledTimes(2)
+        const url = get.mock.calls[1]?.[0] ?? ''
+        expect(url).toContain('include_temporary=true')
+        // The watcher resets pagination to 1 so the operator doesn't
+        // land on an empty tail page if the temp set is smaller.
+        expect(url).toContain('page=1')
+    })
+
+    it('flipping the toggle back off reloads with include_temporary=false', async () => {
+        // Symmetric: toggling off also reloads, so a temp-filtered
+        // view reverts to the canonical set without a manual refresh.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find<HTMLInputElement>('[data-testid="media-show-temporary"]').setValue(true)
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find<HTMLInputElement>('[data-testid="media-show-temporary"]').setValue(false)
+        await flushPromises()
+        await flushPromises()
+        const lastUrl = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(lastUrl).toContain('include_temporary=false')
+    })
+
+    it('persists the toggle across remounts so the next page load keeps the operator\'s pick', async () => {
+        // The toggle is localStorage-persisted: flipping it on,
+        // unmounting, and remounting with the same localStorage must
+        // send include_temporary=true on the first /media call.
+        const first = mount(
+            App,
+            { props: { hostContext: buildContext(vi.fn().mockResolvedValue(emptyList)) } },
+        )
+        await flushPromises()
+        await flushPromises()
+        await first.find<HTMLInputElement>('[data-testid="media-show-temporary"]').setValue(true)
+        await flushPromises()
+        await flushPromises()
+        first.unmount()
+
+        // Fresh mount — localStorage carries the `true` value.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        mount(App, { props: { hostContext: buildContext(get) } })
+        await flushPromises()
+        await flushPromises()
+        const firstCall = get.mock.calls.find((c) => c[0]?.startsWith('/media'))?.[0] ?? ''
+        expect(firstCall).toContain('include_temporary=true')
     })
 })

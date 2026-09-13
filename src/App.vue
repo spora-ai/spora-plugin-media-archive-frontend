@@ -32,6 +32,7 @@ import type {
     MediaType,
 } from './types'
 import { extractAssetId } from './lib/route-detection'
+import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaFilters from './components/MediaFilters.vue'
 import MediaUploadDialog from './components/MediaUploadDialog.vue'
@@ -115,6 +116,14 @@ const total = ref(0)
 const lastPage = ref(1)
 
 const loadingMore = ref(false)
+
+/**
+ * Include-temporary-files toggle. Persisted in localStorage by the
+ * composable; `MediaFilters` owns the UI surface that mutates the
+ * ref, this component owns the wire-side effect (sending the query
+ * param and reloading the grid on flip).
+ */
+const { showTemporary } = useShowTemporaryToggle()
 
 /**
  * Append-mode errors are surfaced inline (under the "Load more"
@@ -219,6 +228,11 @@ function buildPageParams(page: number): URLSearchParams {
     const params = new URLSearchParams()
     params.set('page', String(page))
     params.set('per_page', String(query.value.perPage ?? 24))
+    // `include_temporary` is always emitted so the controller's default
+    // (false) is overridden the same way regardless of the toggle's
+    // current state. Operators who never open the toggle still see the
+    // non-temp rows, and operators who flip it ON see temp rows too.
+    params.set('include_temporary', showTemporary.value ? 'true' : 'false')
     if (query.value.mediaType) params.set('type', query.value.mediaType)
     if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
     if (query.value.search) params.set('search', query.value.search)
@@ -424,6 +438,16 @@ watch(activeAssetId, (id) => {
     if (id === null) {
         void load()
     }
+})
+
+// Reload the grid when the operator flips the "Include temporary
+// files" toggle — the server's filter changes meaning and the
+// client can't just show/hide rows that aren't in `assets`. Reset
+// pagination to page 1 so the operator doesn't land on an empty
+// tail page if the temp set is small.
+watch(showTemporary, () => {
+    query.value = { ...query.value, page: 1 }
+    void load()
 })
 
 onBeforeUnmount(() => {

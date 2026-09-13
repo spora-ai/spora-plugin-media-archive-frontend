@@ -7,6 +7,7 @@ import {
     ExternalLink,
     Eye,
     FileText,
+    Pin,
     RefreshCw,
     Share2,
     Trash2,
@@ -503,6 +504,35 @@ async function confirmDelete(): Promise<void> {
     })
     if (result !== null) {
         emit('deleted', asset.value.id)
+    }
+}
+
+/**
+ * "Keep file" action — spora-core PR #238. Promotes a temporary
+ * asset off the purge queue so it sticks around past the auto-purge
+ * horizon. Lives in its own state slot (`keepingAsset`) rather than
+ * the shared `savingField` because it's an independent action, not a
+ * field save — sharing the slot would make the field-save UI look
+ * busy while the operator is editing the filename.
+ */
+const keepingAsset = ref(false)
+
+async function keepAsset(): Promise<void> {
+    if (asset.value === null || keepingAsset.value) return
+    keepingAsset.value = true
+    errorMessage.value = null
+    try {
+        await dispatchMutation(api.value, {
+            field: 'keep',
+            verb: 'post',
+            path: `/media/${asset.value.id}/keep`,
+        })
+        showToast("File kept — won't be auto-purged.")
+        await loadAsset()
+    } catch (e) {
+        errorMessage.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        keepingAsset.value = false
     }
 }
 
@@ -1045,6 +1075,20 @@ onBeforeUnmount(() => {
                         </button>
                     </div>
                 </form>
+            </section>
+
+            <!-- Temporary-file lifecycle (spora-core PR #238) -->
+            <section v-if="asset.is_temporary === true" class="border-t border-border pt-4">
+                <button
+                    type="button"
+                    :disabled="keepingAsset"
+                    class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="keep-asset-button"
+                    @click="keepAsset"
+                >
+                    <Pin class="h-3.5 w-3.5" />
+                    Keep file
+                </button>
             </section>
 
             <!-- Danger zone -->
