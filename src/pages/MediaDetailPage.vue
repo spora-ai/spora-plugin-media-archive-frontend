@@ -630,8 +630,12 @@ onBeforeUnmount(() => {
                     v-if="editingField !== 'filename'"
                     class="cursor-pointer truncate text-xl font-semibold hover:bg-muted/40 rounded px-1 -mx-1"
                     :title="asset.filename ?? 'Click to set filename'"
+                    tabindex="0"
+                    role="button"
                     data-testid="media-detail-filename"
                     @click="startEditing('filename', asset.filename)"
+                    @keydown.enter.prevent="startEditing('filename', asset.filename)"
+                    @keydown.space.prevent="startEditing('filename', asset.filename)"
                 >
                     {{ asset.filename ?? 'Untitled' }}
                     <span class="ml-2 text-xs font-normal text-muted-foreground">· click to rename</span>
@@ -646,7 +650,6 @@ onBeforeUnmount(() => {
                         id="media-filename-input"
                         v-model="editValue"
                         class="flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
-                        autofocus
                         data-testid="filename-input"
                     />
                     <button
@@ -686,8 +689,13 @@ onBeforeUnmount(() => {
             <figure
                 v-if="previewKind === 'image'"
                 class="group relative flex items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
+                tabindex="0"
+                role="button"
+                aria-label="Open image in lightbox"
                 data-testid="media-preview-figure"
                 @click="openLightbox"
+                @keydown.enter.prevent="openLightbox"
+                @keydown.space.prevent="openLightbox"
             >
                 <img
                     :src="previewSrc ?? ''"
@@ -734,6 +742,8 @@ onBeforeUnmount(() => {
                 :src="previewSrc ?? ''"
                 data-testid="media-page-video"
                 @click="openLightbox"
+                @keydown.enter.prevent="openLightbox"
+                @keydown.space.prevent="openLightbox"
             >
                 <track
                     kind="captions"
@@ -961,8 +971,12 @@ onBeforeUnmount(() => {
                 <p
                     v-if="editingField !== 'prompt'"
                     class="cursor-pointer rounded-md bg-muted/60 p-3 text-sm text-foreground hover:bg-muted"
+                    tabindex="0"
+                    role="button"
                     data-testid="prompt-edit-button"
                     @click="startEditing('prompt', asset.prompt)"
+                    @keydown.enter.prevent="startEditing('prompt', asset.prompt)"
+                    @keydown.space.prevent="startEditing('prompt', asset.prompt)"
                 >
                     {{ asset.prompt ?? '(no prompt — click to add)' }}
                 </p>
@@ -1118,6 +1132,7 @@ onBeforeUnmount(() => {
             @cancel.prevent="closeLightbox"
             @close="closeLightbox"
             @click.self="closeLightbox"
+            @keydown.escape.prevent="closeLightbox"
         >
             <button
                 type="button"
