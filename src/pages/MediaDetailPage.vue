@@ -626,12 +626,11 @@ onBeforeUnmount(() => {
                 <p class="text-xs uppercase tracking-wide text-muted-foreground">
                     {{ asset.media_type }}
                 </p>
-                <h2
+                <button
                     v-if="editingField !== 'filename'"
-                    class="cursor-pointer truncate text-xl font-semibold hover:bg-muted/40 rounded px-1 -mx-1"
+                    type="button"
+                    class="cursor-pointer truncate text-left text-xl font-semibold hover:bg-muted/40 rounded px-1 -mx-1"
                     :title="asset.filename ?? 'Click to set filename'"
-                    tabindex="0"
-                    role="button"
                     data-testid="media-detail-filename"
                     @click="startEditing('filename', asset.filename)"
                     @keydown.enter.prevent="startEditing('filename', asset.filename)"
@@ -639,7 +638,7 @@ onBeforeUnmount(() => {
                 >
                     {{ asset.filename ?? 'Untitled' }}
                     <span class="ml-2 text-xs font-normal text-muted-foreground">· click to rename</span>
-                </h2>
+                </button>
                 <form
                     v-else
                     class="flex items-center gap-2"
@@ -686,11 +685,10 @@ onBeforeUnmount(() => {
                  fallback. An <iframe> would be hijacked by the browser's
                  built-in PDF viewer and trigger a download on click;
                  the card surfaces the file and the action explicitly. -->
-            <figure
+            <button
                 v-if="previewKind === 'image'"
-                class="group relative flex items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
-                tabindex="0"
-                role="button"
+                type="button"
+                class="group relative flex w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
                 aria-label="Open image in lightbox"
                 data-testid="media-preview-figure"
                 @click="openLightbox"
@@ -715,7 +713,7 @@ onBeforeUnmount(() => {
                         <Eye class="h-3.5 w-3.5" /> Click to zoom
                     </span>
                 </div>
-            </figure>
+            </button>
             <div
                 v-else-if="previewKind === 'pdf'"
                 class="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-muted p-8 min-h-[200px] max-h-[80vh]"
@@ -968,18 +966,17 @@ onBeforeUnmount(() => {
             <!-- Prompt -->
             <section>
                 <h3 class="mb-2 text-sm font-semibold">Prompt</h3>
-                <p
+                <button
                     v-if="editingField !== 'prompt'"
-                    class="cursor-pointer rounded-md bg-muted/60 p-3 text-sm text-foreground hover:bg-muted"
-                    tabindex="0"
-                    role="button"
+                    type="button"
+                    class="cursor-pointer w-full rounded-md bg-muted/60 p-3 text-left text-sm text-foreground hover:bg-muted"
                     data-testid="prompt-edit-button"
                     @click="startEditing('prompt', asset.prompt)"
                     @keydown.enter.prevent="startEditing('prompt', asset.prompt)"
                     @keydown.space.prevent="startEditing('prompt', asset.prompt)"
                 >
                     {{ asset.prompt ?? '(no prompt — click to add)' }}
-                </p>
+                </button>
                 <form v-else class="flex flex-col gap-2" @submit.prevent="saveField('prompt')">
                     <label for="media-prompt-input" class="sr-only">Prompt</label>
                     <textarea
