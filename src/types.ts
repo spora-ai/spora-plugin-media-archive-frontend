@@ -77,6 +77,16 @@ export interface MediaAsset {
     tool_call_id: string | null
     created_at: string
     /**
+     * `true` iff the asset is on the temporary-file purge path — see
+     * spora-core PR #238. The list endpoint filters these out by
+     * default (`include_temporary=false`); the operator flips the
+     * "Include temporary files" toggle in `MediaFilters` to surface
+     * them and click `Keep file` on the detail page to remove them
+     * from the purge queue. Older spora-core versions never set the
+     * field, so the consumer treats `undefined` as `false`.
+     */
+    is_temporary?: boolean
+    /**
      * Pre-baked derivatives registered against this asset by any
      * `MediaDerivativeProducerInterface` implementation. The field is
      * always present (possibly empty) — `MediaAssetSerializer`'s

@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MediaFilters from '../src/components/MediaFilters.vue'
 import type { MediaPrincipal } from '../src/types'
+import { __resetShowTemporaryToggleForTesting, useShowTemporaryToggle } from '../src/composables/useShowTemporaryToggle'
 
 /**
  * Fixtures mirror what `GET /principals/me` returns: each principal
@@ -120,5 +121,141 @@ describe('MediaFilters.vue scope chip row', () => {
         })
         expect(wrapper.find('[data-testid="media-type-pills"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-search"]').exists()).toBe(true)
+    })
+})
+
+describe('MediaFilters.vue "Include temporary files" toggle', () => {
+    beforeEach(() => {
+        // Reset the singleton ref + localStorage so each test starts
+        // from the documented default (off) regardless of order.
+        __resetShowTemporaryToggleForTesting()
+    })
+    afterEach(() => {
+        __resetShowTemporaryToggleForTesting()
+    })
+
+    it('renders the toggle and defaults to off', () => {
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
+        const toggleEl = wrapper.find<HTMLInputElement>('[data-testid="media-show-temporary"]')
+        expect(toggleEl.exists()).toBe(true)
+        expect(toggleEl.element.checked).toBe(false)
+        // Shared singleton confirms the default.
+        const { showTemporary } = useShowTemporaryToggle()
+        expect(showTemporary.value).toBe(false)
+    })
+
+    it('flips the singleton ref and persists the change to localStorage on click', async () => {
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
+        const toggleEl = wrapper.find<HTMLInputElement>('[data-testid="media-show-temporary"]')
+        await toggleEl.setValue(true)
+        const { showTemporary } = useShowTemporaryToggle()
+        expect(showTemporary.value).toBe(true)
+        // The composable persists under the documented v1 key so
+        // operators keep their setting across page reloads.
+        expect(localStorage.getItem('spora.media.showTemporary.v1')).toBe('true')
+    })
+
+    it('hydrates the singleton from localStorage on a fresh module load', async () => {
+        // Simulate a previous session having flipped the toggle on.
+        localStorage.setItem('spora.media.showTemporary.v1', 'true')
+        // The composable reads localStorage exactly once at module
+        // load. Force Vitest to re-evaluate the module so the new
+        // value is picked up — this is what happens on a hard browser
+        // reload.
+        vi.resetModules()
+        const fresh = await import('../src/composables/useShowTemporaryToggle')
+        const { showTemporary } = fresh.useShowTemporaryToggle()
+        expect(showTemporary.value).toBe(true)
+    })
+
+    it('persists across a remount that simulates a page reload', async () => {
+        // Flip the toggle on, unmount, mount a fresh component — the
+        // singleton ref (and its localStorage write) carry over so
+        // the new mount sees the same state.
+        const first = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
+        await first.find<HTMLInputElement>('[data-testid="media-show-temporary"]').setValue(true)
+        first.unmount()
+
+        const second = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [],
+                selectedScope: null,
+                groupLabels: {},
+            },
+        })
+        const secondToggle = second.find<HTMLInputElement>('[data-testid="media-show-temporary"]')
+        expect(secondToggle.element.checked).toBe(true)
+    })
+
+    it('falls back to the documented default when localStorage is unavailable', async () => {
+        // SSR / private-mode browsers throw on localStorage access.
+        // The composable wraps every read/write in try/catch and
+        // guards `typeof localStorage === 'undefined'` for the SSR
+        // case. Stub the global to undefined and reload the module
+        // to exercise those defensive branches.
+        vi.stubGlobal('localStorage', undefined)
+        vi.resetModules()
+        const fresh = await import('../src/composables/useShowTemporaryToggle')
+        const { showTemporary, toggle } = fresh.useShowTemporaryToggle()
+        expect(showTemporary.value).toBe(false)
+        // Toggle should still work — the in-memory ref is the source
+        // of truth, persistence is a best-effort optimisation.
+        toggle()
+        expect(showTemporary.value).toBe(true)
+        vi.unstubAllGlobals()
+    })
+
+    it('tolerates a localStorage that throws on every read/write call', async () => {
+        // Safari private mode + some hardened enterprise browsers
+        // expose `localStorage` but throw on every method call. The
+        // composable must swallow the throws and keep the in-memory
+        // ref working — losing persistence is acceptable, losing the
+        // UI is not.
+        const throwingStorage = {
+            getItem: vi.fn(() => { throw new Error('SecurityError') }),
+            setItem: vi.fn(() => { throw new Error('SecurityError') }),
+            removeItem: vi.fn(() => { throw new Error('SecurityError') }),
+        }
+        vi.stubGlobal('localStorage', throwingStorage)
+        vi.resetModules()
+        const fresh = await import('../src/composables/useShowTemporaryToggle')
+        const { showTemporary, setShowTemporary } = fresh.useShowTemporaryToggle()
+        const reset = fresh.__resetShowTemporaryToggleForTesting
+        expect(typeof reset).toBe('function')
+        // Read throws — defaults to off.
+        expect(showTemporary.value).toBe(false)
+        // Write throws — the in-memory ref still flips.
+        setShowTemporary(true)
+        expect(showTemporary.value).toBe(true)
+        // Reset helper tolerates the throw too.
+        expect(() => reset()).not.toThrow()
+        expect(showTemporary.value).toBe(false)
+        vi.unstubAllGlobals()
     })
 })

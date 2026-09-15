@@ -7,6 +7,7 @@ import {
     ExternalLink,
     Eye,
     FileText,
+    Pin,
     RefreshCw,
     Share2,
     Trash2,
@@ -507,6 +508,35 @@ async function confirmDelete(): Promise<void> {
 }
 
 /**
+ * "Keep file" action — spora-core PR #238. Promotes a temporary
+ * asset off the purge queue so it sticks around past the auto-purge
+ * horizon. Lives in its own state slot (`keepingAsset`) rather than
+ * the shared `savingField` because it's an independent action, not a
+ * field save — sharing the slot would make the field-save UI look
+ * busy while the operator is editing the filename.
+ */
+const keepingAsset = ref(false)
+
+async function keepAsset(): Promise<void> {
+    if (asset.value === null || keepingAsset.value) return
+    keepingAsset.value = true
+    errorMessage.value = null
+    try {
+        await dispatchMutation(api.value, {
+            field: 'keep',
+            verb: 'post',
+            path: `/media/${asset.value.id}/keep`,
+        })
+        showToast("File kept — won't be auto-purged.")
+        await loadAsset()
+    } catch (e) {
+        errorMessage.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        keepingAsset.value = false
+    }
+}
+
+/**
  * Splice a freshly-produced derivative into `asset.derivatives`. We
  * keep the locally-returned asset id + URL so the strip's chip row
  * updates immediately; a follow-up `loadAsset()` would also work,
@@ -596,16 +626,19 @@ onBeforeUnmount(() => {
                 <p class="text-xs uppercase tracking-wide text-muted-foreground">
                     {{ asset.media_type }}
                 </p>
-                <h2
+                <button
                     v-if="editingField !== 'filename'"
-                    class="cursor-pointer truncate text-xl font-semibold hover:bg-muted/40 rounded px-1 -mx-1"
+                    type="button"
+                    class="cursor-pointer truncate text-left text-xl font-semibold hover:bg-muted/40 rounded px-1 -mx-1"
                     :title="asset.filename ?? 'Click to set filename'"
                     data-testid="media-detail-filename"
                     @click="startEditing('filename', asset.filename)"
+                    @keydown.enter.prevent="startEditing('filename', asset.filename)"
+                    @keydown.space.prevent="startEditing('filename', asset.filename)"
                 >
                     {{ asset.filename ?? 'Untitled' }}
                     <span class="ml-2 text-xs font-normal text-muted-foreground">· click to rename</span>
-                </h2>
+                </button>
                 <form
                     v-else
                     class="flex items-center gap-2"
@@ -616,7 +649,6 @@ onBeforeUnmount(() => {
                         id="media-filename-input"
                         v-model="editValue"
                         class="flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
-                        autofocus
                         data-testid="filename-input"
                     />
                     <button
@@ -653,11 +685,15 @@ onBeforeUnmount(() => {
                  fallback. An <iframe> would be hijacked by the browser's
                  built-in PDF viewer and trigger a download on click;
                  the card surfaces the file and the action explicitly. -->
-            <figure
+            <button
                 v-if="previewKind === 'image'"
-                class="group relative flex items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
+                type="button"
+                class="group relative flex w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
+                aria-label="Open image in lightbox"
                 data-testid="media-preview-figure"
                 @click="openLightbox"
+                @keydown.enter.prevent="openLightbox"
+                @keydown.space.prevent="openLightbox"
             >
                 <img
                     :src="previewSrc ?? ''"
@@ -677,7 +713,7 @@ onBeforeUnmount(() => {
                         <Eye class="h-3.5 w-3.5" /> Click to zoom
                     </span>
                 </div>
-            </figure>
+            </button>
             <div
                 v-else-if="previewKind === 'pdf'"
                 class="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-muted p-8 min-h-[200px] max-h-[80vh]"
@@ -704,6 +740,8 @@ onBeforeUnmount(() => {
                 :src="previewSrc ?? ''"
                 data-testid="media-page-video"
                 @click="openLightbox"
+                @keydown.enter.prevent="openLightbox"
+                @keydown.space.prevent="openLightbox"
             >
                 <track
                     kind="captions"
@@ -928,14 +966,17 @@ onBeforeUnmount(() => {
             <!-- Prompt -->
             <section>
                 <h3 class="mb-2 text-sm font-semibold">Prompt</h3>
-                <p
+                <button
                     v-if="editingField !== 'prompt'"
-                    class="cursor-pointer rounded-md bg-muted/60 p-3 text-sm text-foreground hover:bg-muted"
+                    type="button"
+                    class="cursor-pointer w-full rounded-md bg-muted/60 p-3 text-left text-sm text-foreground hover:bg-muted"
                     data-testid="prompt-edit-button"
                     @click="startEditing('prompt', asset.prompt)"
+                    @keydown.enter.prevent="startEditing('prompt', asset.prompt)"
+                    @keydown.space.prevent="startEditing('prompt', asset.prompt)"
                 >
                     {{ asset.prompt ?? '(no prompt — click to add)' }}
-                </p>
+                </button>
                 <form v-else class="flex flex-col gap-2" @submit.prevent="saveField('prompt')">
                     <label for="media-prompt-input" class="sr-only">Prompt</label>
                     <textarea
@@ -1047,6 +1088,20 @@ onBeforeUnmount(() => {
                 </form>
             </section>
 
+            <!-- Temporary-file lifecycle (spora-core PR #238) -->
+            <section v-if="asset.is_temporary === true" class="border-t border-border pt-4">
+                <button
+                    type="button"
+                    :disabled="keepingAsset"
+                    class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="keep-asset-button"
+                    @click="keepAsset"
+                >
+                    <Pin class="h-3.5 w-3.5" />
+                    Keep file
+                </button>
+            </section>
+
             <!-- Danger zone -->
             <section class="border-t border-destructive/30 pt-4">
                 <button
@@ -1074,6 +1129,7 @@ onBeforeUnmount(() => {
             @cancel.prevent="closeLightbox"
             @close="closeLightbox"
             @click.self="closeLightbox"
+            @keydown.escape.prevent="closeLightbox"
         >
             <button
                 type="button"

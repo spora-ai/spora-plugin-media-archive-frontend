@@ -2,12 +2,27 @@
 import { computed } from 'vue'
 import { Image, FileAudio, FileVideo, FileText } from 'lucide-vue-next'
 import type { MediaAsset } from '../types'
+import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 
 const props = defineProps<{ asset: MediaAsset }>()
 
 const isImage = computed(() => props.asset.media_type === 'image')
 const isAudio = computed(() => props.asset.media_type === 'audio')
 const isVideo = computed(() => props.asset.media_type === 'video')
+
+/**
+ * Show the corner "Temporary" badge iff the asset is on the purge
+ * list AND the operator has flipped the "Include temporary files"
+ * toggle on. When the toggle is off, the server filters temp rows
+ * out so the badge never has anything to render — but the AND
+ * keeps the check defensive in case the toggle ever desyncs from
+ * the next /media call (rapid flips, races, etc.).
+ */
+const { showTemporary } = useShowTemporaryToggle()
+
+const showTemporaryBadge = computed(() =>
+    props.asset.is_temporary === true && showTemporary.value === true,
+)
 
 const createdAt = computed(() => {
     try {
@@ -56,6 +71,13 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
         :data-testid="`media-card-${asset.id}`"
     >
         <div class="relative aspect-square overflow-hidden rounded-md bg-muted">
+            <span
+                v-if="showTemporaryBadge"
+                class="pointer-events-none absolute right-2 top-2 z-10 inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 ring-1 ring-amber-500/20"
+                data-testid="media-card-temporary-badge"
+            >
+                Temporary
+            </span>
             <img
                 v-if="isImage"
                 :src="asset.asset_url"

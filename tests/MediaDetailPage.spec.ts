@@ -140,7 +140,7 @@ describe('MediaDetailPage', () => {
         api.patch.mockResolvedValue({ ...sample, filename: 'renamed.png' })
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        await wrapper.find('h2.cursor-pointer').trigger('click')
+        await wrapper.find('button.cursor-pointer').trigger('click')
         await flushPromises()
         const input = wrapper.find('input[data-testid="filename-input"]')
         await input.setValue('renamed.png')
@@ -317,7 +317,7 @@ describe('MediaDetailPage', () => {
         api.patch.mockResolvedValue({ ...sample, filename: 'renamed.png' })
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        const heading = wrapper.find('h2.cursor-pointer')
+        const heading = wrapper.find('button.cursor-pointer')
         await heading.trigger('click')
         await flushPromises()
         const input = wrapper.find('input[data-testid="filename-input"]')
@@ -334,7 +334,7 @@ describe('MediaDetailPage', () => {
         const { hostContext, api } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        await wrapper.find('h2.cursor-pointer').trigger('click')
+        await wrapper.find('button.cursor-pointer').trigger('click')
         await flushPromises()
         const input = wrapper.find('input[data-testid="filename-input"]')
         await input.setValue('   ')
@@ -350,7 +350,7 @@ describe('MediaDetailPage', () => {
         const { hostContext, api } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        await wrapper.find('h2.cursor-pointer').trigger('click')
+        await wrapper.find('button.cursor-pointer').trigger('click')
         await flushPromises()
         const input = wrapper.find('input[data-testid="filename-input"]')
         await input.setValue('never-saved.png')
@@ -936,6 +936,114 @@ describe('MediaDetailPage', () => {
         expect(err.text()).toContain('HTTP 404 Not Found')
 
         vi.unstubAllGlobals()
+    })
+
+    it('hides the Keep file button when the asset is not temporary', async () => {
+        // Non-temp assets (the default for everything pre-PR #238)
+        // must not show the action — only assets on the purge queue
+        // need it. The button is opt-in by server contract.
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="keep-asset-button"]').exists()).toBe(false)
+    })
+
+    it('renders the Keep file button when is_temporary is true', async () => {
+        // Toggle on at the wire level — server returns the flag and
+        // the page should surface the affordance.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, is_temporary: true })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        const keep = wrapper.find('[data-testid="keep-asset-button"]')
+        expect(keep.exists()).toBe(true)
+        expect(keep.text()).toContain('Keep file')
+    })
+
+    it('calls POST /media/{id}/keep on click, toasts on success, and refreshes the asset', async () => {
+        // Happy path: button → POST → toast → refetch. Three GETs
+        // happen: (1) initial asset load, (2) VersionsStrip options
+        // endpoint on mount, (3) post-keep refetch. The post endpoint
+        // returns the refreshed asset; the refetch picks up
+        // is_temporary=false so the section unmounts.
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, is_temporary: true })
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce({ ...sample, is_temporary: false })
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockResolvedValue({ ...sample, is_temporary: false })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        await wrapper.find('[data-testid="keep-asset-button"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        // dispatchMutation forwards `undefined` as the explicit body
+        // arg, matching the existing refresh-public-token test
+        // convention for endpoints that take no body.
+        expect(api.post).toHaveBeenCalledWith(`/media/${sample.id}/keep`, undefined)
+        // Toast text surfaces the action's outcome.
+        expect(wrapper.text()).toContain("won't be auto-purged")
+        // The handler re-fetches the asset to pick up is_temporary=false.
+        // `get` was called three times: initial load + options + refetch.
+        const mediaCalls = get.mock.calls.filter((c) => c[0] === `/media/${sample.id}`)
+        expect(mediaCalls.length).toBe(2)
+    })
+
+    it('disables the Keep file button while the request is in flight', async () => {
+        // Double-click protection: the button must stay disabled
+        // until the POST resolves so a rapid operator can't fire
+        // two keep requests against the same asset.
+        let resolvePost: ((value: MediaAsset) => void) | null = null
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, is_temporary: true })
+            .mockResolvedValueOnce([])
+            // Post-resolve refetch — `keepAsset()` calls `loadAsset()`
+            // to pick up is_temporary=false.
+            .mockResolvedValueOnce({ ...sample, is_temporary: false })
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockReturnValueOnce(new Promise<MediaAsset>((resolve) => {
+            resolvePost = resolve
+        }))
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        await wrapper.find('[data-testid="keep-asset-button"]').trigger('click')
+        await flushPromises()
+        const midButton = wrapper.find('[data-testid="keep-asset-button"]')
+        expect(midButton.exists()).toBe(true)
+        expect(midButton.attributes('disabled')).toBeDefined()
+
+        // Settle the in-flight request — button re-enables.
+        ;(resolvePost as unknown as ((value: MediaAsset) => void) | null)?.({ ...sample, is_temporary: false })
+        await flushPromises()
+        await flushPromises()
+        const afterButton = wrapper.find('[data-testid="keep-asset-button"]')
+        // After the keep succeeded, the asset is no longer temporary
+        // so the section is removed entirely (the parent `v-if` flips
+        // off). This is the correct post-success UX — the button
+        // vanishes, the toast confirms.
+        expect(afterButton.exists()).toBe(false)
+    })
+
+    it('surfaces a failed keep as the in-page error message', async () => {
+        // Failure mode parity with the rest of the page's mutations:
+        // a rejected POST sets `errorMessage` (same slot that
+        // `mutate()` uses), and the toast does NOT fire.
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, is_temporary: true })
+            .mockResolvedValueOnce([])
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockRejectedValueOnce(new Error('forbidden'))
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        await wrapper.find('[data-testid="keep-asset-button"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.text()).toContain('forbidden')
+        expect(wrapper.text()).not.toContain("won't be auto-purged")
     })
 
 })

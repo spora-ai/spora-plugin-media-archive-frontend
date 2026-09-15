@@ -21,6 +21,7 @@
 import { computed } from 'vue'
 import { Image, FileAudio, FileVideo, FileText, Search, User, LayoutGrid, Users } from 'lucide-vue-next'
 import type { MediaPrincipal, MediaType } from '../types'
+import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 
 type Scope = number | null
 
@@ -130,6 +131,16 @@ function onScopeClick(id: Scope): void {
     }
     emit('update:scope', id)
 }
+
+/**
+ * "Include temporary files" toggle. Surfaced here because it's a list-
+ * scoping concern (mirrors the dashboard's flag-chip row) and the
+ * state is localStorage-persisted — see the composable's docblock.
+ * Default is OFF: the controller already filters temp rows out, and
+ * flipping the switch is an opt-in to surface them. The parent
+ * (`App.vue`) watches the same ref to reload the grid.
+ */
+const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
 </script>
 
 <template>
@@ -192,6 +203,17 @@ function onScopeClick(id: Scope): void {
                 data-testid="media-search"
                 @input="emit('update:search', ($event.target as HTMLInputElement).value)"
             />
+        </label>
+
+        <label class="inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+                type="checkbox"
+                :checked="showTemporary"
+                class="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary"
+                data-testid="media-show-temporary"
+                @change="toggleShowTemporary"
+            />
+            Include temporary files
         </label>
     </div>
 </template>
