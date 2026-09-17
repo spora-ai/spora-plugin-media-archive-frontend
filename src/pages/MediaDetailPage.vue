@@ -264,6 +264,12 @@ const editingField = ref<string | null>(null)
 const editValue = ref<string>('')
 const savingField = ref<string | null>(null)
 
+// Union: filename + tags use `<input>`, prompt uses `<textarea>`. The
+// markdown editor (MdEditor) is its own component and intentionally
+// excluded. `startEditing()` focuses + selects it on next tick so the
+// operator can type without clicking twice.
+const editingInput = ref<HTMLInputElement | HTMLTextAreaElement | null>(null)
+
 async function loadAsset(): Promise<void> {
     loading.value = true
     errorMessage.value = null
@@ -359,9 +365,14 @@ watch(lightboxOpen, async (open) => {
     }
 })
 
-function startEditing(field: string, current: string | null | undefined): void {
+async function startEditing(field: string, current: string | null | undefined): Promise<void> {
     editingField.value = field
     editValue.value = current ?? ''
+    // nextTick: v-if must commit before the input exists. select() so
+    // the first keystroke replaces the whole value.
+    await nextTick()
+    editingInput.value?.focus()
+    editingInput.value?.select()
 }
 
 function cancelEdit(): void {
@@ -647,6 +658,7 @@ onBeforeUnmount(() => {
                     <label for="media-filename-input" class="sr-only">Filename</label>
                     <input
                         id="media-filename-input"
+                        ref="editingInput"
                         v-model="editValue"
                         class="flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
                         data-testid="filename-input"
@@ -917,6 +929,7 @@ onBeforeUnmount(() => {
                         <label for="media-tags-input" class="sr-only">Tags</label>
                         <input
                             id="media-tags-input"
+                            ref="editingInput"
                             v-model="editValue"
                             class="flex-1 rounded border border-border bg-background px-2 py-1"
                             placeholder="tag1, tag2, tag3"
@@ -981,6 +994,7 @@ onBeforeUnmount(() => {
                     <label for="media-prompt-input" class="sr-only">Prompt</label>
                     <textarea
                         id="media-prompt-input"
+                        ref="editingInput"
                         v-model="editValue"
                         class="min-h-[80px] rounded border border-border bg-background p-2 text-sm"
                     ></textarea>

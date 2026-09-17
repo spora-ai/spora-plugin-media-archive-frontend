@@ -295,6 +295,59 @@ describe('MediaDetailPage', () => {
         expect(wrapper.find('input[placeholder^="tag1"]').exists()).toBe(true)
     })
 
+    it('focuses the filename input after the rename button is clicked', async () => {
+        // Regression: PR #33 dropped `autofocus`, so the operator had to
+        // click twice. Fix template-refs the input and focuses it on nextTick.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, filename: 'old.png' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, {
+            props: { assetId: sample.id, hostContext },
+            attachTo: document.body,
+        })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-detail-filename"]').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[data-testid="filename-input"]')
+        expect(input.exists()).toBe(true)
+        expect(document.activeElement).toBe(input.element)
+        // select() so the first keystroke replaces the whole string.
+        expect((input.element as HTMLInputElement).selectionStart).toBe(0)
+        expect((input.element as HTMLInputElement).selectionEnd).toBe('old.png'.length)
+        wrapper.unmount()
+    })
+
+    it('focuses the tags input after the tags edit button is clicked', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, tags: ['draft'] })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, {
+            props: { assetId: sample.id, hostContext },
+            attachTo: document.body,
+        })
+        await flushPromises()
+        await wrapper.find('[data-testid="tags-edit-button"]').trigger('click')
+        await flushPromises()
+        const input = wrapper.find('input[placeholder^="tag1"]')
+        expect(input.exists()).toBe(true)
+        expect(document.activeElement).toBe(input.element)
+        wrapper.unmount()
+    })
+
+    it('focuses the prompt textarea after the prompt edit button is clicked', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, prompt: 'a tiny pixel' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, {
+            props: { assetId: sample.id, hostContext },
+            attachTo: document.body,
+        })
+        await flushPromises()
+        await wrapper.find('[data-testid="prompt-edit-button"]').trigger('click')
+        await flushPromises()
+        const textarea = wrapper.find('textarea')
+        expect(textarea.exists()).toBe(true)
+        expect(document.activeElement).toBe(textarea.element)
+        wrapper.unmount()
+    })
+
     it('saves the prompt inline edit', async () => {
         const get = vi.fn().mockResolvedValueOnce(sample)
         const { hostContext, api } = buildHostContext(get)

@@ -302,7 +302,7 @@ describe('MediaUploadDialog', () => {
         wrapper.unmount()
     })
 
-    it('closes the dialog when the backdrop is clicked directly', async () => {
+    it('does not close when the backdrop is clicked directly', async () => {
         const harness = buildHost()
         const wrapper = mount(MediaUploadDialog, {
             props: dialogProps(harness, 101),
@@ -313,13 +313,12 @@ describe('MediaUploadDialog', () => {
         const dialog = uploadDialog()
         const backdrop = uploadBackdrop()
         expect(dialog.open).toBe(true)
-        // `@click.self` semantics: only fire when target === currentTarget,
-        // i.e. the click lands on the backdrop element itself rather than
-        // any of its descendants. We synthesise that explicitly.
+        // Backdrop's click handler was dropped (SonarQube S6804); close
+        // is now via the `<dialog>`'s native Escape affordance only.
         backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         await flushPromises()
-        expect(dialog.open).toBe(false)
-        expect(wrapper.emitted('close')).toBeDefined()
+        expect(dialog.open).toBe(true)
+        expect(wrapper.emitted('close')).toBeUndefined()
         wrapper.unmount()
     })
 
@@ -332,9 +331,8 @@ describe('MediaUploadDialog', () => {
         wrapper.vm.open()
         await flushPromises()
         const dialog = uploadDialog()
-        // A click that bubbles from the inner card should be stopped by the
-        // card's `@click.stop` handler before reaching `@click.self` on the
-        // backdrop wrapper.
+        // Clicks bubble from the inner card through the handler-less
+        // backdrop into the `<dialog>`, which doesn't close on plain clicks.
         dialog.querySelector('[data-testid="media-upload-form"]')!.dispatchEvent(
             new MouseEvent('click', { bubbles: true }),
         )
