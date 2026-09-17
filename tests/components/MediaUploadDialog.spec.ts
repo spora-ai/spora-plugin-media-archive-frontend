@@ -302,7 +302,7 @@ describe('MediaUploadDialog', () => {
         wrapper.unmount()
     })
 
-    it('closes the dialog when the backdrop is clicked directly', async () => {
+    it('does not close when the backdrop is clicked directly', async () => {
         const harness = buildHost()
         const wrapper = mount(MediaUploadDialog, {
             props: dialogProps(harness, 101),
@@ -313,13 +313,15 @@ describe('MediaUploadDialog', () => {
         const dialog = uploadDialog()
         const backdrop = uploadBackdrop()
         expect(dialog.open).toBe(true)
-        // `@click.self` semantics: only fire when target === currentTarget,
-        // i.e. the click lands on the backdrop element itself rather than
-        // any of its descendants. We synthesise that explicitly.
+        // SonarQube `Web:MouseEventWithoutKeyboardEquivalentCheck`: the
+        // backdrop has no keyboard affordance, so its click handler was
+        // removed in favour of Escape (`@cancel.prevent="close"`) which
+        // the `<dialog>` element already exposes. A click on the backdrop
+        // must therefore leave the dialog open.
         backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         await flushPromises()
-        expect(dialog.open).toBe(false)
-        expect(wrapper.emitted('close')).toBeDefined()
+        expect(dialog.open).toBe(true)
+        expect(wrapper.emitted('close')).toBeUndefined()
         wrapper.unmount()
     })
 
@@ -332,9 +334,9 @@ describe('MediaUploadDialog', () => {
         wrapper.vm.open()
         await flushPromises()
         const dialog = uploadDialog()
-        // A click that bubbles from the inner card should be stopped by the
-        // card's `@click.stop` handler before reaching `@click.self` on the
-        // backdrop wrapper.
+        // Inner card has no click handler — clicks bubble harmlessly
+        // through the backdrop wrapper (also handler-less) up to the
+        // `<dialog>` itself, which doesn't close on a plain click.
         dialog.querySelector('[data-testid="media-upload-form"]')!.dispatchEvent(
             new MouseEvent('click', { bubbles: true }),
         )

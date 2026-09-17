@@ -51,9 +51,9 @@ function writeToStorage(value: boolean): void {
 const showTemporary = ref<boolean>(readFromStorage())
 
 // Module-level side effect: persist every change. The watcher is
-// registered once at module load (Vue deduplicates identical sources
-// inside the same effect scope) so calling `useShowTemporaryToggle`
-// repeatedly doesn't stack callbacks.
+// registered once at module load (the `watch()` call lives outside
+// `useShowTemporaryToggle`), so repeated calls to the composable
+// reuse the same subscription and never stack new ones.
 watch(showTemporary, (next) => {
     writeToStorage(next)
 })
