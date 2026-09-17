@@ -264,17 +264,10 @@ const editingField = ref<string | null>(null)
 const editValue = ref<string>('')
 const savingField = ref<string | null>(null)
 
-/**
- * Template-ref for the active inline editor's input/textarea (filename,
- * tags, prompt). `startEditing()` focuses + selects it on the next tick
- * so the operator can type immediately after clicking the rename
- * button — without this the heading swap leaves focus on the now-hidden
- * button and the operator has to click a second time before typing.
- *
- * Typed as a union because filename + tags use `<input>` and prompt
- * uses `<textarea>`. The markdown editor (`MdEditor`) is its own
- * complex component and is deliberately excluded.
- */
+// Union: filename + tags use `<input>`, prompt uses `<textarea>`. The
+// markdown editor (MdEditor) is its own component and intentionally
+// excluded. `startEditing()` focuses + selects it on next tick so the
+// operator can type without clicking twice.
 const editingInput = ref<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
 async function loadAsset(): Promise<void> {
@@ -375,11 +368,8 @@ watch(lightboxOpen, async (open) => {
 async function startEditing(field: string, current: string | null | undefined): Promise<void> {
     editingField.value = field
     editValue.value = current ?? ''
-    // nextTick — the v-if/v-else swap that shows the editor input
-    // happens after this reactive write commits; focusing before the
-    // node exists would no-op. `select()` so renaming a long filename
-    // replaces the whole string on the first keystroke instead of
-    // appending.
+    // nextTick: v-if must commit before the input exists. select() so
+    // the first keystroke replaces the whole value.
     await nextTick()
     editingInput.value?.focus()
     editingInput.value?.select()

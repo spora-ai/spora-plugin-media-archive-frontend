@@ -313,11 +313,8 @@ describe('MediaUploadDialog', () => {
         const dialog = uploadDialog()
         const backdrop = uploadBackdrop()
         expect(dialog.open).toBe(true)
-        // SonarQube `Web:MouseEventWithoutKeyboardEquivalentCheck`: the
-        // backdrop has no keyboard affordance, so its click handler was
-        // removed in favour of Escape (`@cancel.prevent="close"`) which
-        // the `<dialog>` element already exposes. A click on the backdrop
-        // must therefore leave the dialog open.
+        // Backdrop's click handler was dropped (SonarQube S6804); close
+        // is now via the `<dialog>`'s native Escape affordance only.
         backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         await flushPromises()
         expect(dialog.open).toBe(true)
@@ -334,9 +331,8 @@ describe('MediaUploadDialog', () => {
         wrapper.vm.open()
         await flushPromises()
         const dialog = uploadDialog()
-        // Inner card has no click handler — clicks bubble harmlessly
-        // through the backdrop wrapper (also handler-less) up to the
-        // `<dialog>` itself, which doesn't close on a plain click.
+        // Clicks bubble from the inner card through the handler-less
+        // backdrop into the `<dialog>`, which doesn't close on plain clicks.
         dialog.querySelector('[data-testid="media-upload-form"]')!.dispatchEvent(
             new MouseEvent('click', { bubbles: true }),
         )

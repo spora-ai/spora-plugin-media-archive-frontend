@@ -296,10 +296,8 @@ describe('MediaDetailPage', () => {
     })
 
     it('focuses the filename input after the rename button is clicked', async () => {
-        // PR #33 dropped the `autofocus` attribute on the rename input;
-        // the heading swap still happened but focus stayed on the now-
-        // hidden button, so the operator had to click a second time.
-        // The fix template-refs the input and focuses it on nextTick.
+        // Regression: PR #33 dropped `autofocus`, so the operator had to
+        // click twice. Fix template-refs the input and focuses it on nextTick.
         const get = vi.fn().mockResolvedValueOnce({ ...sample, filename: 'old.png' })
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, {
@@ -312,8 +310,7 @@ describe('MediaDetailPage', () => {
         const input = wrapper.find('input[data-testid="filename-input"]')
         expect(input.exists()).toBe(true)
         expect(document.activeElement).toBe(input.element)
-        // `select()` is also part of the contract so renaming a long
-        // filename replaces the whole string on the first keystroke.
+        // select() so the first keystroke replaces the whole string.
         expect((input.element as HTMLInputElement).selectionStart).toBe(0)
         expect((input.element as HTMLInputElement).selectionEnd).toBe('old.png'.length)
         wrapper.unmount()
