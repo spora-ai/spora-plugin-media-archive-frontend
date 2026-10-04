@@ -233,6 +233,154 @@ describe('MediaDetailPage', () => {
         expect(imgClasses).not.toContain('w-full')
     })
 
+    it('pins a definite height on the image figure so the image is never cropped', async () => {
+        // Regression: `max-h-[80vh]` is an auto height, so the img's percentage
+        // `max-h-full` computed to `none` and the image overflowed.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, width: 4000, height: 6000 })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        const figureClasses = wrapper.find('[data-testid="media-preview-figure"]').classes()
+        expect(figureClasses.some((c) => /^h-\[.+\]$/.test(c))).toBe(true)
+        expect(figureClasses.some((c) => c.startsWith('max-h-['))).toBe(false)
+        expect(figureClasses).toContain('overflow-hidden')
+        expect(wrapper.find('[data-testid="media-preview-img"]').classes()).toContain('object-contain')
+    })
+
+    it('lays the preview and the details out side by side on desktop', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        const layout = wrapper.find('[data-testid="media-detail-layout"]')
+        expect(layout.exists()).toBe(true)
+        // Equal tracks: portrait/square images are height-bound, so a wider
+        // preview column is dead space (measured 58% / 37% of the box unused).
+        expect(layout.classes()).toContain('lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]')
+        expect(layout.classes()).toContain('items-start')
+
+        const previewColumn = wrapper.find('[data-testid="media-detail-preview-column"]')
+        const infoColumn = wrapper.find('[data-testid="media-detail-info-column"]')
+        expect(previewColumn.exists()).toBe(true)
+        expect(infoColumn.exists()).toBe(true)
+        expect(previewColumn.find('[data-testid="media-preview-figure"]').exists()).toBe(true)
+        expect(infoColumn.find('[data-testid="media-page-download"]').exists()).toBe(true)
+        expect(previewColumn.find('[data-testid="media-page-download"]').exists()).toBe(false)
+        expect(wrapper.html().indexOf('media-detail-preview-column'))
+            .toBeLessThan(wrapper.html().indexOf('media-detail-info-column'))
+    })
+
+    it('keeps the no-preview fallback compact and gives the operator a way out', async () => {
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'application/pdf',
+                asset_url: '/api/v1/assets/test-1.pdf',
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+
+        const fallback = wrapper.find('[data-testid="media-preview-fallback"]')
+        expect(fallback.exists()).toBe(true)
+        const classes = fallback.classes()
+        expect(classes).not.toContain('aspect-video')
+        expect(classes.some((c) => /^h-\[.+\]$/.test(c))).toBe(false)
+        expect(classes).toContain('self-start')
+        expect(fallback.text()).toContain('document')
+
+        const download = fallback.find('[data-testid="media-preview-fallback-download"]')
+        expect(download.attributes('href')).toBe('/api/v1/assets/test-1.pdf')
+        const open = fallback.find('[data-testid="media-preview-fallback-open"]')
+        expect(open.attributes('href')).toBe('/api/v1/assets/test-1.pdf')
+        expect(open.attributes('target')).toBe('_blank')
+        expect(open.attributes('rel')).toBe('noopener')
+    })
+
+    it('downloads the selected derivative instead of the source file', async () => {
+        const derivative = makeImageDerivative({ format: 'png' })
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, filename: 'shot.pdf', derivatives: [derivative] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        const source = wrapper.find('a[data-testid="media-page-download"]')
+        expect(source.attributes('href')).toBe(sample.asset_url)
+        expect(source.attributes('download')).toBe('shot.pdf')
+        expect(source.text()).toContain('Download')
+        expect(source.text()).not.toContain('derivative')
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+
+        // shot.pdf + png → shot.png, not shot.pdf.png.
+        const swapped = wrapper.find('a[data-testid="media-page-download"]')
+        expect(swapped.attributes('href')).toBe(derivative.asset_url)
+        expect(swapped.attributes('download')).toBe('shot.png')
+        expect(swapped.text()).toContain('PNG derivative')
+
+        await wrapper.find('[data-testid="versions-source"]').trigger('click')
+        await flushPromises()
+        const restored = wrapper.find('a[data-testid="media-page-download"]')
+        expect(restored.attributes('href')).toBe(sample.asset_url)
+        expect(restored.attributes('download')).toBe('shot.pdf')
+    })
+
+    it('synthesizes a derivative download name when the asset has no filename', async () => {
+        const derivative = makeImageDerivative({ format: 'thumbnail-256' })
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...sample, filename: null, derivatives: [derivative] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('a[data-testid="media-page-download"]').attributes('download'))
+            .toBe('minimax-test-1.thumbnail-256')
+    })
+
+    it('downloads the derivative from the PDF preview card too', async () => {
+        // Regression: `:download` received `previewAlt` — the prompt, not a
+        // filename.
+        const pdfDerivative: MediaDerivative = {
+            format: 'pdf',
+            media_id: 'derivative-pdf-1',
+            asset_url: '/api/v1/assets/derivative-pdf-1.pdf',
+            producer_plugin: 'spora-plugin-typst',
+            producer_operation: 'render',
+            created_at: '2026-01-01T00:00:01.000Z',
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'text/x-typst',
+                filename: 'paper.typ',
+                derivatives: [pdfDerivative],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        const card = wrapper.find('[data-testid="media-preview-pdf-download"]')
+        expect(card.attributes('href')).toBe(pdfDerivative.asset_url)
+        expect(card.attributes('download')).toBe('paper.pdf')
+    })
+
     it('does not render a download link for non-image assets without a preview block', async () => {
         const get = vi.fn().mockResolvedValueOnce({ ...sample, media_type: 'audio', mime_type: 'audio/mpeg' })
         const { hostContext } = buildHostContext(get)

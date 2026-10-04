@@ -115,6 +115,20 @@ const previewAlt = computed<string>(() => {
 })
 
 /**
+ * Definite height, not `max-h-*`: the img's `max-h-full` is a percentage,
+ * which computes to `none` against an auto-height parent — with the old
+ * `max-h-[80vh]` figure that overflowed and `overflow-hidden` cropped it.
+ */
+const previewSurfaceClass = 'flex h-[40vh] min-h-[220px] w-full lg:h-[70vh]'
+
+const previewUnavailableLabel = computed<string>(() => {
+    if (asset.value === null) return 'this file'
+    return selectedDerivative.value !== null
+        ? selectedDerivative.value.format
+        : asset.value.media_type
+})
+
+/**
  * What element to render in the preview pane. Branches on the
  * SELECTED derivative's format when one is active, else on the
  * source asset's media_type + mime_type. The previous implementation
@@ -307,10 +321,29 @@ const createdAt = computed(() => {
     }
 })
 
-const downloadName = computed(() => {
+// Download follows the versions strip: an active chip means the operator
+// wants the converted file, not the parent.
+const downloadSrc = computed<string>(() => previewSrc.value ?? '')
+
+const downloadName = computed<string>(() => {
     if (asset.value === null) return 'media'
-    return asset.value.filename
-        ?? `${asset.value.plugin_slug ?? 'media'}-${asset.value.id}.${asset.value.mime_type?.split('/')[1] ?? 'bin'}`
+    const derivative = selectedDerivative.value
+    if (derivative === null) {
+        return asset.value.filename
+            ?? `${asset.value.plugin_slug ?? 'media'}-${asset.value.id}.${asset.value.mime_type?.split('/')[1] ?? 'bin'}`
+    }
+    // Swap the extension, don't append: notes.pdf + png → notes.png.
+    const stem = (asset.value.filename ?? `${asset.value.plugin_slug ?? 'media'}-${asset.value.id}`)
+        .replace(/\.[^./\\]+$/, '')
+    return `${stem}.${derivative.format !== '' ? derivative.format : 'bin'}`
+})
+
+// Names the selection so the operator can tell what Download will serve.
+const downloadLabel = computed<string>(() => {
+    const format = selectedDerivative.value?.format
+    return format !== undefined && format !== ''
+        ? `Download ${format.toUpperCase()} derivative`
+        : 'Download'
 })
 
 const isShared = computed(() => asset.value !== null && Boolean(asset.value.public_url))
@@ -690,446 +723,493 @@ onBeforeUnmount(() => {
                 @select="onDerivativeSelected"
                 @produced="onDerivativeProduced"
             />
-            <!-- Preview — branches on `previewKind` (which itself
-                 branches on the SELECTED derivative's format when one
-                 is active) so a PDF derivative on a `.typ` source
-                 lands on the PDF download card, not the document-source
-                 fallback. An <iframe> would be hijacked by the browser's
-                 built-in PDF viewer and trigger a download on click;
-                 the card surfaces the file and the action explicitly. -->
-            <button
-                v-if="previewKind === 'image'"
-                type="button"
-                class="group relative flex w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-4 min-h-[200px] max-h-[80vh]"
-                aria-label="Open image in lightbox"
-                data-testid="media-preview-figure"
-                @click="openLightbox"
-                @keydown.enter.prevent="openLightbox"
-                @keydown.space.prevent="openLightbox"
-            >
-                <img
-                    :src="previewSrc ?? ''"
-                    :alt="previewAlt"
-                    class="max-h-full max-w-full object-contain"
-                    data-testid="media-preview-img"
-                />
-                <div
-                    v-if="selectedDerivativeId !== 'source'"
-                    class="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground shadow-sm"
-                    data-testid="media-preview-derivative-badge"
-                >
-                    Viewing derivative
-                </div>
-                <div class="pointer-events-none absolute inset-0 flex items-end justify-end bg-gradient-to-t from-foreground/40 to-transparent p-3 opacity-0 transition-opacity group-hover:opacity-100">
-                    <span class="inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
-                        <Eye class="h-3.5 w-3.5" /> Click to zoom
-                    </span>
-                </div>
-            </button>
+            <!-- `items-start` is required for the sticky preview: a stretched grid
+                 item is already as tall as its area. Equal columns — the figure is
+                 height-capped, so portrait/square images are height-bound and a
+                 wider preview column is dead space. Below `lg` it collapses to one
+                 column, preserving the mobile order. -->
             <div
-                v-else-if="previewKind === 'pdf'"
-                class="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-muted p-8 min-h-[200px] max-h-[80vh]"
-                data-testid="media-preview-pdf"
+                class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+                data-testid="media-detail-layout"
             >
-                <FileText class="h-12 w-12 text-muted-foreground" />
-                <div class="text-sm font-medium text-foreground">{{ previewAlt }}</div>
-                <a
-                    :href="previewSrc ?? ''"
-                    :download="previewAlt"
-                    class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-                    data-testid="media-preview-pdf-download"
-                >
-                    <Download class="h-4 w-4" />
-                    Download PDF
-                </a>
-            </div>
-            <video
-                v-else-if="previewKind === 'video'"
-                controls
-                muted
-                playsinline
-                class="w-full cursor-zoom-in rounded-lg border border-border"
-                :src="previewSrc ?? ''"
-                data-testid="media-page-video"
-                @click="openLightbox"
-                @keydown.enter.prevent="openLightbox"
-                @keydown.space.prevent="openLightbox"
-            >
-                <track
-                    kind="captions"
-                    src="data:text/vtt,WEBVTT%0A%0A"
-                    srclang="en"
-                    label="No captions available"
-                    default
-                />
-            </video>
-            <audio
-                v-else-if="previewKind === 'audio'"
-                controls
-                class="w-full"
-                :src="previewSrc ?? ''"
-                data-testid="media-page-audio"
-            />
-            <pre
-                v-else-if="previewKind === 'text'"
-                class="max-h-[80vh] overflow-auto rounded-lg border border-border bg-muted p-4 text-xs font-mono leading-relaxed text-foreground"
-                data-testid="media-preview-text"
-            ><code v-if="textSource !== null" data-testid="media-preview-text-body">{{ textSource }}</code><code
-                v-else-if="textSourceLoading"
-                class="text-muted-foreground"
-                data-testid="media-preview-text-loading"
-            >Loading source…</code><code
-                v-else-if="textSourceError"
-                class="text-destructive"
-                data-testid="media-preview-text-error"
-            >Couldn't load source: {{ textSourceError }}</code></pre>
-            <div
-                v-else
-                class="flex aspect-video items-center justify-center rounded-lg border border-dashed border-border bg-muted text-sm text-muted-foreground"
-                data-testid="media-preview-fallback"
-            >
-                Preview unavailable for {{ selectedDerivative !== null ? selectedDerivative.format : asset.media_type }}
-            </div>
-
-            <!-- Primary actions -->
-            <div class="flex flex-wrap gap-2">
-                <a
-                    :href="asset.asset_url"
-                    :download="downloadName"
-                    class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                    data-testid="media-page-download"
-                >
-                    <Download class="h-4 w-4" />
-                    Download
-                </a>
-                <button
-                    type="button"
-                    class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
-                    data-testid="copy-uuid"
-                    @click="copyToClipboard(asset.id, 'UUID')"
-                >
-                    <Copy class="h-3.5 w-3.5" />
-                    Copy UUID
-                </button>
-                <button
-                    type="button"
-                    class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
-                    data-testid="copy-filename"
-                    @click="copyToClipboard(asset.filename ?? asset.id, 'Filename')"
-                >
-                    <Copy class="h-3.5 w-3.5" />
-                    Copy filename
-                </button>
-            </div>
-
-            <!-- Public sharing -->
-            <section class="rounded-lg border border-border bg-muted/30 p-4">
-                <div class="flex items-center justify-between">
-                    <h3 class="flex items-center gap-1.5 text-sm font-semibold">
-                        <Share2 class="h-4 w-4" />
-                        Public sharing
-                    </h3>
-                    <label class="inline-flex items-center gap-2 text-sm">
-                        <input
-                            type="checkbox"
-                            :checked="isShared"
-                            :disabled="savingField !== null"
-                            data-testid="public-sharing-toggle"
-                            @change="toggleSharing"
-                        />
-                        <output aria-live="polite" data-testid="sharing-status">
-                            {{ isShared ? 'Enabled' : 'Disabled' }}
-                        </output>
-                    </label>
-                </div>
-                <template v-if="isShared">
-                    <div class="mt-3 rounded border border-border bg-background p-2 font-mono text-xs break-all">
-                        {{ asset.public_url }}
-                    </div>
-                    <!--
-                        The backend (spora-core#137 → PublicMediaController::show) emits
-                        `Referrer-Policy: no-referrer` so the ?token=… query never leaks
-                        to third-party assets via Referer.
-                    -->
-                    <div class="mt-2 flex flex-wrap gap-2">
-                        <button
-                            type="button"
-                            class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
-                            data-testid="copy-public-url"
-                            @click="copyToClipboard(asset.public_url ?? '', 'Public URL')"
-                        >
-                            <Copy class="h-3 w-3" /> Copy URL
-                        </button>
-                        <button
-                            type="button"
-                            :disabled="savingField !== null"
-                            class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
-                            data-testid="refresh-public-token"
-                            @click="refreshShareToken"
-                        >
-                            <RefreshCw class="h-3 w-3" /> Refresh token
-                        </button>
-                    </div>
-                </template>
-                <p v-else class="mt-2 text-xs text-muted-foreground">
-                    When enabled, anyone with the URL can fetch the file (no auth required).
-                </p>
-            </section>
-
-            <!-- Metadata -->
-            <dl class="grid grid-cols-3 gap-2 text-xs">
-                <dt class="text-muted-foreground">Created</dt>
-                <dd class="col-span-2 text-foreground">{{ createdAt }}</dd>
-
-                <dt class="text-muted-foreground">MIME</dt>
-                <dd class="col-span-2 font-mono text-foreground">{{ asset.mime_type ?? 'unknown' }}</dd>
-
-                <template v-if="asset.width !== null && asset.height !== null">
-                    <dt class="text-muted-foreground">Dimensions</dt>
-                    <dd class="col-span-2 text-foreground">{{ asset.width }} × {{ asset.height }}</dd>
-                </template>
-
-                <template v-if="asset.duration_seconds !== null">
-                    <dt class="text-muted-foreground">Duration</dt>
-                    <dd class="col-span-2 text-foreground">{{ asset.duration_seconds?.toFixed(2) }}s</dd>
-                </template>
-
-                <template v-if="asset.byte_size !== null">
-                    <dt class="text-muted-foreground">Size</dt>
-                    <dd class="col-span-2 text-foreground">{{ asset.byte_size }} bytes</dd>
-                </template>
-
-                <dt class="text-muted-foreground">Storage</dt>
-                <dd class="col-span-2 text-foreground">{{ asset.storage_mode }}</dd>
-
-                <template v-if="asset.has_markdown">
-                    <dt class="text-muted-foreground">Markdown</dt>
-                    <dd class="col-span-2 text-foreground">
-                        <span class="inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                            Extracted
-                        </span>
-                    </dd>
-                </template>
-
-                <dt class="text-muted-foreground">Tags</dt>
-                <dd v-if="editingField !== 'tags'" class="col-span-2">
+                <!--
+                    PDF derivatives get a download card, not an <iframe>: the
+                    browser's built-in viewer hijacks the embed and downloads on
+                    click.
+                -->
+                <div class="flex min-w-0 flex-col gap-3 lg:sticky lg:top-4" data-testid="media-detail-preview-column">
                     <button
+                        v-if="previewKind === 'image'"
                         type="button"
-                        class="cursor-pointer rounded px-1 -mx-1 text-left hover:bg-muted/40 w-full"
-                        :title="'Click to edit tags'"
-                        data-testid="tags-edit-button"
-                        @click="startEditing('tags', tagsString)"
+                        class="group relative items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-3"
+                        :class="previewSurfaceClass"
+                        aria-label="Open image in lightbox"
+                        data-testid="media-preview-figure"
+                        @click="openLightbox"
+                        @keydown.enter.prevent="openLightbox"
+                        @keydown.space.prevent="openLightbox"
                     >
-                        <span v-if="tagsString">{{ tagsString }}</span>
-                        <span v-else class="italic text-muted-foreground">click to add tags</span>
-                    </button>
-                </dd>
-                <dd v-else class="col-span-2">
-                    <form class="flex gap-1" @submit.prevent="saveField('tags')">
-                        <label for="media-tags-input" class="sr-only">Tags</label>
-                        <input
-                            id="media-tags-input"
-                            ref="editingInput"
-                            v-model="editValue"
-                            class="flex-1 rounded border border-border bg-background px-2 py-1"
-                            placeholder="tag1, tag2, tag3"
+                        <!-- No `w-full`: a small image must stay at native size. -->
+                        <img
+                            :src="previewSrc ?? ''"
+                            :alt="previewAlt"
+                            class="max-h-full max-w-full object-contain"
+                            data-testid="media-preview-img"
                         />
-                        <button
-                            type="submit"
-                            :disabled="savingField !== null"
-                            class="rounded bg-primary px-2 text-xs text-primary-foreground disabled:opacity-50"
-                            data-testid="tags-save"
+                        <div
+                            v-if="selectedDerivativeId !== 'source'"
+                            class="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground shadow-sm"
+                            data-testid="media-preview-derivative-badge"
                         >
-                            Save
-                        </button>
-                        <button
-                            type="button"
-                            class="rounded px-2 text-xs text-muted-foreground"
-                            data-testid="tags-cancel"
-                            @click="cancelEdit"
-                        >
-                            Cancel
-                        </button>
-                    </form>
-                </dd>
-
-                <template v-if="asset.task_id">
-                    <dt class="text-muted-foreground">Task</dt>
-                    <dd class="col-span-2 font-mono text-foreground">{{ asset.task_id }}</dd>
-                </template>
-
-                <template v-if="asset.source_url">
-                    <dt class="text-muted-foreground">Source</dt>
-                    <dd class="col-span-2 break-all">
-                        <a
-                            v-if="safeExternalUrl(asset.source_url) !== null"
-                            :href="safeExternalUrl(asset.source_url) ?? undefined"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
-                        >
-                            {{ asset.source_url }}
-                            <ExternalLink class="h-3 w-3" />
-                        </a>
-                        <span v-else class="italic text-muted-foreground">Invalid source URL</span>
-                    </dd>
-                </template>
-            </dl>
-
-            <!-- Prompt -->
-            <section>
-                <h3 class="mb-2 text-sm font-semibold">Prompt</h3>
-                <button
-                    v-if="editingField !== 'prompt'"
-                    type="button"
-                    class="cursor-pointer w-full rounded-md bg-muted/60 p-3 text-left text-sm text-foreground hover:bg-muted"
-                    data-testid="prompt-edit-button"
-                    @click="startEditing('prompt', asset.prompt)"
-                    @keydown.enter.prevent="startEditing('prompt', asset.prompt)"
-                    @keydown.space.prevent="startEditing('prompt', asset.prompt)"
-                >
-                    {{ asset.prompt ?? '(no prompt — click to add)' }}
-                </button>
-                <form v-else class="flex flex-col gap-2" @submit.prevent="saveField('prompt')">
-                    <label for="media-prompt-input" class="sr-only">Prompt</label>
-                    <textarea
-                        id="media-prompt-input"
-                        ref="editingInput"
-                        v-model="editValue"
-                        class="min-h-[80px] rounded border border-border bg-background p-2 text-sm"
-                    ></textarea>
-                    <div class="flex justify-end gap-2">
-                        <button
-                            type="button"
-                            class="rounded px-3 py-1 text-xs text-muted-foreground"
-                            data-testid="prompt-cancel"
-                            @click="cancelEdit"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="savingField !== null"
-                            class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
-                            data-testid="prompt-save"
-                        >
-                            Save
-                        </button>
-                    </div>
-                </form>
-            </section>
-
-            <!-- Markdown -->
-            <section>
-                <div class="mb-2 flex items-center justify-between">
-                    <h3 class="text-sm font-semibold">Markdown</h3>
+                            Viewing derivative
+                        </div>
+                        <div class="pointer-events-none absolute inset-0 flex items-end justify-end bg-gradient-to-t from-foreground/40 to-transparent p-3 opacity-0 transition-opacity group-hover:opacity-100">
+                            <span class="inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
+                                <Eye class="h-3.5 w-3.5" /> Click to zoom
+                            </span>
+                        </div>
+                    </button>
                     <div
-                        v-if="editingField !== 'markdown' && asset.markdown_content !== null"
-                        class="flex items-center gap-2"
+                        v-else-if="previewKind === 'pdf'"
+                        class="flex-col items-center justify-center gap-4 rounded-lg border border-border bg-muted p-8"
+                        :class="previewSurfaceClass"
+                        data-testid="media-preview-pdf"
                     >
-                        <button
-                            type="button"
-                            class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
-                            data-testid="markdown-edit-button"
-                            @click="startEditing('markdown', asset.markdown_content)"
+                        <FileText class="h-12 w-12 text-muted-foreground" />
+                        <div class="text-sm font-medium text-foreground">{{ previewAlt }}</div>
+                        <a
+                            :href="downloadSrc"
+                            :download="downloadName"
+                            class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+                            data-testid="media-preview-pdf-download"
                         >
-                            Edit
-                        </button>
+                            <Download class="h-4 w-4" />
+                            Download PDF
+                        </a>
+                    </div>
+                    <video
+                        v-else-if="previewKind === 'video'"
+                        controls
+                        muted
+                        playsinline
+                        class="max-h-[40vh] w-full cursor-zoom-in rounded-lg border border-border object-contain lg:max-h-[70vh]"
+                        :src="previewSrc ?? ''"
+                        data-testid="media-page-video"
+                        @click="openLightbox"
+                        @keydown.enter.prevent="openLightbox"
+                        @keydown.space.prevent="openLightbox"
+                    >
+                        <track
+                            kind="captions"
+                            src="data:text/vtt,WEBVTT%0A%0A"
+                            srclang="en"
+                            label="No captions available"
+                            default
+                        />
+                    </video>
+                    <audio
+                        v-else-if="previewKind === 'audio'"
+                        controls
+                        class="w-full"
+                        :src="previewSrc ?? ''"
+                        data-testid="media-page-audio"
+                    />
+                    <pre
+                        v-else-if="previewKind === 'text'"
+                        class="min-h-[160px] overflow-auto rounded-lg border border-border bg-muted p-4 text-xs font-mono leading-relaxed text-foreground lg:max-h-[70vh]"
+                        data-testid="media-preview-text"
+                    ><code v-if="textSource !== null" data-testid="media-preview-text-body">{{ textSource }}</code><code
+                        v-else-if="textSourceLoading"
+                        class="text-muted-foreground"
+                        data-testid="media-preview-text-loading"
+                    >Loading source…</code><code
+                        v-else-if="textSourceError"
+                        class="text-destructive"
+                        data-testid="media-preview-text-error"
+                    >Couldn't load source: {{ textSourceError }}</code></pre>
+                    <!-- Content-sized: a full-bleed box made an unrenderable file
+                         look like a failed preview. -->
+                    <div
+                        v-else
+                        class="flex flex-col items-center justify-center gap-3 self-start rounded-lg border border-dashed border-border bg-muted/40 p-6 text-center"
+                        data-testid="media-preview-fallback"
+                    >
+                        <FileText class="h-8 w-8 text-muted-foreground" />
+                        <p class="text-sm text-foreground">
+                            No inline preview for
+                            <span class="font-medium">{{ previewUnavailableLabel }}</span>
+                        </p>
+                        <p class="max-w-xs text-xs text-muted-foreground">
+                            Download the file or open it in a new tab to view it.
+                        </p>
+                        <div class="mt-1 flex flex-wrap justify-center gap-2">
+                            <a
+                                :href="downloadSrc"
+                                :download="downloadName"
+                                class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
+                                data-testid="media-preview-fallback-download"
+                            >
+                                <Download class="h-3.5 w-3.5" />
+                                Download
+                            </a>
+                            <a
+                                :href="downloadSrc"
+                                target="_blank"
+                                rel="noopener"
+                                class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
+                                data-testid="media-preview-fallback-open"
+                            >
+                                <ExternalLink class="h-3.5 w-3.5" />
+                                Open in new tab
+                            </a>
+                        </div>
                     </div>
                 </div>
-                <div
-                    v-if="editingField !== 'markdown' && asset.markdown_content !== null"
-                    class="rounded-md border border-border bg-background p-3 max-h-96 overflow-auto"
-                    data-testid="markdown-preview-wrapper"
-                >
-                    <MdPreview
-                        :model-value="asset.markdown_content"
-                        :language="MARKDOWN_LOCALE"
-                        class="bg-transparent"
-                        data-testid="markdown-preview"
-                    />
-                </div>
-                <p
-                    v-else-if="editingField !== 'markdown'"
-                    class="rounded-md bg-muted/60 p-3 text-sm italic text-muted-foreground"
-                    data-testid="markdown-empty"
-                >
-                    No extracted markdown yet.
-                    <button
-                        type="button"
-                        class="ml-2 not-italic text-primary underline-offset-2 hover:underline"
-                        data-testid="markdown-add-button"
-                        @click="startEditing('markdown', '')"
-                    >
-                        Add markdown
-                    </button>
-                </p>
-                <form
-                    v-else
-                    class="flex flex-col gap-2"
-                    data-testid="markdown-edit-form"
-                    @submit.prevent="saveField('markdown')"
-                >
-                    <label for="media-markdown-input" class="sr-only">Markdown content</label>
-                    <MdEditor
-                        id="media-markdown-input"
-                        :model-value="editValue"
-                        :rows="12"
-                        :preview="true"
-                        :language="MARKDOWN_LOCALE"
-                        :toolbars="markdownEditorToolbars"
-                        data-testid="markdown-editor"
-                        @update:model-value="editValue = $event"
-                    />
-                    <div class="flex justify-end gap-2">
+
+                <!-- Info column: actions, sharing, metadata, prompt, markdown, lifecycle. -->
+                <div class="flex min-w-0 flex-col gap-6" data-testid="media-detail-info-column">
+                    <!-- Primary actions -->
+                    <div class="flex flex-wrap gap-2">
+                        <a
+                            :href="downloadSrc"
+                            :download="downloadName"
+                            :title="downloadLabel"
+                            class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                            data-testid="media-page-download"
+                        >
+                            <Download class="h-4 w-4" />
+                            {{ downloadLabel }}
+                        </a>
                         <button
                             type="button"
-                            class="rounded px-3 py-1 text-xs text-muted-foreground"
-                            data-testid="markdown-cancel"
-                            @click="cancelEdit"
+                            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+                            data-testid="copy-uuid"
+                            @click="copyToClipboard(asset.id, 'UUID')"
                         >
-                            Cancel
+                            <Copy class="h-3.5 w-3.5" />
+                            Copy UUID
                         </button>
                         <button
-                            type="submit"
-                            :disabled="savingField !== null"
-                            class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
-                            data-testid="markdown-save"
+                            type="button"
+                            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+                            data-testid="copy-filename"
+                            @click="copyToClipboard(asset.filename ?? asset.id, 'Filename')"
                         >
-                            Save
+                            <Copy class="h-3.5 w-3.5" />
+                            Copy filename
                         </button>
                     </div>
-                </form>
-            </section>
 
-            <!-- Temporary-file lifecycle (spora-core PR #238) -->
-            <section v-if="asset.is_temporary === true" class="border-t border-border pt-4">
-                <button
-                    type="button"
-                    :disabled="keepingAsset"
-                    class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    data-testid="keep-asset-button"
-                    @click="keepAsset"
-                >
-                    <Pin class="h-3.5 w-3.5" />
-                    Keep file
-                </button>
-            </section>
+                    <!-- Public sharing -->
+                    <section class="rounded-lg border border-border bg-muted/30 p-4">
+                        <div class="flex items-center justify-between">
+                            <h3 class="flex items-center gap-1.5 text-sm font-semibold">
+                                <Share2 class="h-4 w-4" />
+                                Public sharing
+                            </h3>
+                            <label class="inline-flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    :checked="isShared"
+                                    :disabled="savingField !== null"
+                                    data-testid="public-sharing-toggle"
+                                    @change="toggleSharing"
+                                />
+                                <output aria-live="polite" data-testid="sharing-status">
+                                    {{ isShared ? 'Enabled' : 'Disabled' }}
+                                </output>
+                            </label>
+                        </div>
+                        <template v-if="isShared">
+                            <div class="mt-3 rounded border border-border bg-background p-2 font-mono text-xs break-all">
+                                {{ asset.public_url }}
+                            </div>
+                            <!--
+                            The backend (spora-core#137 → PublicMediaController::show) emits
+                            `Referrer-Policy: no-referrer` so the ?token=… query never leaks
+                            to third-party assets via Referer.
+                        -->
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
+                                    data-testid="copy-public-url"
+                                    @click="copyToClipboard(asset.public_url ?? '', 'Public URL')"
+                                >
+                                    <Copy class="h-3 w-3" /> Copy URL
+                                </button>
+                                <button
+                                    type="button"
+                                    :disabled="savingField !== null"
+                                    class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                                    data-testid="refresh-public-token"
+                                    @click="refreshShareToken"
+                                >
+                                    <RefreshCw class="h-3 w-3" /> Refresh token
+                                </button>
+                            </div>
+                        </template>
+                        <p v-else class="mt-2 text-xs text-muted-foreground">
+                            When enabled, anyone with the URL can fetch the file (no auth required).
+                        </p>
+                    </section>
 
-            <!-- Danger zone -->
-            <section class="border-t border-destructive/30 pt-4">
-                <button
-                    type="button"
-                    class="inline-flex items-center gap-1.5 rounded border border-destructive/40 bg-background px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
-                    data-testid="media-page-delete"
-                    @click="openDeleteDialog"
-                >
-                    <Trash2 class="h-3.5 w-3.5" />
-                    Delete asset
-                </button>
-            </section>
+                    <!-- Metadata -->
+                    <dl class="grid grid-cols-3 gap-2 text-xs">
+                        <dt class="text-muted-foreground">Created</dt>
+                        <dd class="col-span-2 text-foreground">{{ createdAt }}</dd>
 
-            <p v-if="errorMessage" class="rounded bg-destructive/10 p-2 text-xs text-destructive">{{ errorMessage }}</p>
+                        <dt class="text-muted-foreground">MIME</dt>
+                        <dd class="col-span-2 font-mono text-foreground">{{ asset.mime_type ?? 'unknown' }}</dd>
+
+                        <template v-if="asset.width !== null && asset.height !== null">
+                            <dt class="text-muted-foreground">Dimensions</dt>
+                            <dd class="col-span-2 text-foreground">{{ asset.width }} × {{ asset.height }}</dd>
+                        </template>
+
+                        <template v-if="asset.duration_seconds !== null">
+                            <dt class="text-muted-foreground">Duration</dt>
+                            <dd class="col-span-2 text-foreground">{{ asset.duration_seconds?.toFixed(2) }}s</dd>
+                        </template>
+
+                        <template v-if="asset.byte_size !== null">
+                            <dt class="text-muted-foreground">Size</dt>
+                            <dd class="col-span-2 text-foreground">{{ asset.byte_size }} bytes</dd>
+                        </template>
+
+                        <dt class="text-muted-foreground">Storage</dt>
+                        <dd class="col-span-2 text-foreground">{{ asset.storage_mode }}</dd>
+
+                        <template v-if="asset.has_markdown">
+                            <dt class="text-muted-foreground">Markdown</dt>
+                            <dd class="col-span-2 text-foreground">
+                                <span class="inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                    Extracted
+                                </span>
+                            </dd>
+                        </template>
+
+                        <dt class="text-muted-foreground">Tags</dt>
+                        <dd v-if="editingField !== 'tags'" class="col-span-2">
+                            <button
+                                type="button"
+                                class="cursor-pointer rounded px-1 -mx-1 text-left hover:bg-muted/40 w-full"
+                                :title="'Click to edit tags'"
+                                data-testid="tags-edit-button"
+                                @click="startEditing('tags', tagsString)"
+                            >
+                                <span v-if="tagsString">{{ tagsString }}</span>
+                                <span v-else class="italic text-muted-foreground">click to add tags</span>
+                            </button>
+                        </dd>
+                        <dd v-else class="col-span-2">
+                            <form class="flex gap-1" @submit.prevent="saveField('tags')">
+                                <label for="media-tags-input" class="sr-only">Tags</label>
+                                <input
+                                    id="media-tags-input"
+                                    ref="editingInput"
+                                    v-model="editValue"
+                                    class="flex-1 rounded border border-border bg-background px-2 py-1"
+                                    placeholder="tag1, tag2, tag3"
+                                />
+                                <button
+                                    type="submit"
+                                    :disabled="savingField !== null"
+                                    class="rounded bg-primary px-2 text-xs text-primary-foreground disabled:opacity-50"
+                                    data-testid="tags-save"
+                                >
+                                    Save
+                                </button>
+                                <button
+                                    type="button"
+                                    class="rounded px-2 text-xs text-muted-foreground"
+                                    data-testid="tags-cancel"
+                                    @click="cancelEdit"
+                                >
+                                    Cancel
+                                </button>
+                            </form>
+                        </dd>
+
+                        <template v-if="asset.task_id">
+                            <dt class="text-muted-foreground">Task</dt>
+                            <dd class="col-span-2 font-mono text-foreground">{{ asset.task_id }}</dd>
+                        </template>
+
+                        <template v-if="asset.source_url">
+                            <dt class="text-muted-foreground">Source</dt>
+                            <dd class="col-span-2 break-all">
+                                <a
+                                    v-if="safeExternalUrl(asset.source_url) !== null"
+                                    :href="safeExternalUrl(asset.source_url) ?? undefined"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+                                >
+                                    {{ asset.source_url }}
+                                    <ExternalLink class="h-3 w-3" />
+                                </a>
+                                <span v-else class="italic text-muted-foreground">Invalid source URL</span>
+                            </dd>
+                        </template>
+                    </dl>
+
+                    <!-- Prompt -->
+                    <section>
+                        <h3 class="mb-2 text-sm font-semibold">Prompt</h3>
+                        <button
+                            v-if="editingField !== 'prompt'"
+                            type="button"
+                            class="cursor-pointer w-full rounded-md bg-muted/60 p-3 text-left text-sm text-foreground hover:bg-muted"
+                            data-testid="prompt-edit-button"
+                            @click="startEditing('prompt', asset.prompt)"
+                            @keydown.enter.prevent="startEditing('prompt', asset.prompt)"
+                            @keydown.space.prevent="startEditing('prompt', asset.prompt)"
+                        >
+                            {{ asset.prompt ?? '(no prompt — click to add)' }}
+                        </button>
+                        <form v-else class="flex flex-col gap-2" @submit.prevent="saveField('prompt')">
+                            <label for="media-prompt-input" class="sr-only">Prompt</label>
+                            <textarea
+                                id="media-prompt-input"
+                                ref="editingInput"
+                                v-model="editValue"
+                                class="min-h-[80px] rounded border border-border bg-background p-2 text-sm"
+                            ></textarea>
+                            <div class="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    class="rounded px-3 py-1 text-xs text-muted-foreground"
+                                    data-testid="prompt-cancel"
+                                    @click="cancelEdit"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    :disabled="savingField !== null"
+                                    class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                                    data-testid="prompt-save"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </form>
+                    </section>
+
+                    <!-- Markdown -->
+                    <section>
+                        <div class="mb-2 flex items-center justify-between">
+                            <h3 class="text-sm font-semibold">Markdown</h3>
+                            <div
+                                v-if="editingField !== 'markdown' && asset.markdown_content !== null"
+                                class="flex items-center gap-2"
+                            >
+                                <button
+                                    type="button"
+                                    class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
+                                    data-testid="markdown-edit-button"
+                                    @click="startEditing('markdown', asset.markdown_content)"
+                                >
+                                    Edit
+                                </button>
+                            </div>
+                        </div>
+                        <div
+                            v-if="editingField !== 'markdown' && asset.markdown_content !== null"
+                            class="rounded-md border border-border bg-background p-3 max-h-96 overflow-auto"
+                            data-testid="markdown-preview-wrapper"
+                        >
+                            <MdPreview
+                                :model-value="asset.markdown_content"
+                                :language="MARKDOWN_LOCALE"
+                                class="bg-transparent"
+                                data-testid="markdown-preview"
+                            />
+                        </div>
+                        <p
+                            v-else-if="editingField !== 'markdown'"
+                            class="rounded-md bg-muted/60 p-3 text-sm italic text-muted-foreground"
+                            data-testid="markdown-empty"
+                        >
+                            No extracted markdown yet.
+                            <button
+                                type="button"
+                                class="ml-2 not-italic text-primary underline-offset-2 hover:underline"
+                                data-testid="markdown-add-button"
+                                @click="startEditing('markdown', '')"
+                            >
+                                Add markdown
+                            </button>
+                        </p>
+                        <form
+                            v-else
+                            class="flex flex-col gap-2"
+                            data-testid="markdown-edit-form"
+                            @submit.prevent="saveField('markdown')"
+                        >
+                            <label for="media-markdown-input" class="sr-only">Markdown content</label>
+                            <MdEditor
+                                id="media-markdown-input"
+                                :model-value="editValue"
+                                :rows="12"
+                                :preview="true"
+                                :language="MARKDOWN_LOCALE"
+                                :toolbars="markdownEditorToolbars"
+                                data-testid="markdown-editor"
+                                @update:model-value="editValue = $event"
+                            />
+                            <div class="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    class="rounded px-3 py-1 text-xs text-muted-foreground"
+                                    data-testid="markdown-cancel"
+                                    @click="cancelEdit"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    :disabled="savingField !== null"
+                                    class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                                    data-testid="markdown-save"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </form>
+                    </section>
+
+                    <!-- Temporary-file lifecycle (spora-core PR #238) -->
+                    <section v-if="asset.is_temporary === true" class="border-t border-border pt-4">
+                        <button
+                            type="button"
+                            :disabled="keepingAsset"
+                            class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            data-testid="keep-asset-button"
+                            @click="keepAsset"
+                        >
+                            <Pin class="h-3.5 w-3.5" />
+                            Keep file
+                        </button>
+                    </section>
+
+                    <!-- Danger zone -->
+                    <section class="border-t border-destructive/30 pt-4">
+                        <button
+                            type="button"
+                            class="inline-flex items-center gap-1.5 rounded border border-destructive/40 bg-background px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+                            data-testid="media-page-delete"
+                            @click="openDeleteDialog"
+                        >
+                            <Trash2 class="h-3.5 w-3.5" />
+                            Delete asset
+                        </button>
+                    </section>
+
+                    <p v-if="errorMessage" class="rounded bg-destructive/10 p-2 text-xs text-destructive">{{ errorMessage }}</p>
+                </div>
+            </div>
         </template>
 
         <!-- Lightbox dialog -->
