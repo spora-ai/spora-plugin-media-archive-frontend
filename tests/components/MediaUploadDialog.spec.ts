@@ -23,7 +23,6 @@ const sampleAsset: MediaAsset = {
     duration_seconds: null,
     prompt: null,
     filename: 'shot.png',
-    markdown_content: null,
     tags: null,
     asset_url: '/api/v1/assets/asset-1.png',
     source_url: null,

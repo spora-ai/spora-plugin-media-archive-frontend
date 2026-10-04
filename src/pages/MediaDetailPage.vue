@@ -15,35 +15,20 @@ import {
 } from 'lucide-vue-next'
 import type { MediaAsset, MediaDerivative } from '../types'
 import type { PluginHostContext } from '../shims'
-import { MdEditor, MdPreview, type ToolbarNames } from 'md-editor-v3'
+import { MdPreview } from 'md-editor-v3'
+// Kept as a global side-effect import. The stylesheet is the editor
+// chrome plus the markdown typography `<MdPreview>` needs (headings,
+// lists, tables, code blocks); the preview pane renders the `md`
+// derivative with it, so dropping the import would leave the rendered
+// markdown unstyled. The editor half is dead weight we accept rather
+// than reimplement markdown rendering.
 import 'md-editor-v3/lib/style.css'
 import VersionsStrip from '../components/VersionsStrip.vue'
 
 /**
- * Toolbar buttons rendered on the markdown editor. Mirrors the host SPA's
- * `MarkdownEditor.vue` `full` mode so operators get the same muscle memory
- * across the chat composer and this detail page. Deliberately omits
- * `github` (third-party branding in the toolbar), `mermaid` (we don't ship
- * diagrams in extracted docs), and `formula` (we don't ship LaTeX in
- * extracted docs).
- */
-const markdownEditorToolbars: ToolbarNames[] = [
-    'bold', 'underline', 'italic', 'strikeThrough',
-    '-',
-    'title', 'sub', 'sup', 'quote',
-    '-',
-    'unorderedList', 'orderedList', 'task',
-    '-',
-    'code', 'codeRow', 'link', 'image', 'table',
-    '-',
-    'preview',
-    'pageFullscreen',
-]
-
-/**
- * Locale for the editor + preview UI. `md-editor-v3` ships Chinese as the
- * default; pin to en-US so the toolbar labels and screen-reader text are
- * consistent with the rest of the admin UI.
+ * Locale for the markdown preview. `md-editor-v3` ships Chinese as the
+ * default; pin to en-US so the rendered markup and screen-reader text
+ * are consistent with the rest of the admin UI.
  */
 const MARKDOWN_LOCALE = 'en-US'
 
@@ -129,21 +114,29 @@ const previewUnavailableLabel = computed<string>(() => {
 })
 
 /**
+ * Which branch of the preview pane's `v-if` chain renders. `text` is
+ * the fetch-on-demand body (raw `<pre>` or rendered markdown);
+ * `unsupported` is the grey "Preview unavailable" card.
+ */
+type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'
+
+/**
  * What element to render in the preview pane. Branches on the
- * SELECTED derivative's format when one is active, else on the
- * source asset's media_type + mime_type. The previous implementation
+ * SELECTED derivative's format + mime_type when one is active, else on
+ * the source asset's media_type + mime_type. The previous implementation
  * only branched on `asset.media_type`, which meant a `.typ` source
  * with a freshly-produced PDF derivative rendered the wrong branch —
  * the `<img>` only existed inside `v-if="media_type === 'image'"`,
  * so the chip click silently changed `selectedDerivativeId` without
  * updating the DOM. Now the chip click on any format swap lands on
  * an element that can render it (PDF → download card, raster → img,
- * text source → fetched `<pre>`).
+ * text → fetched body).
  */
-const previewKind = computed<'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'>(() => {
+const previewKind = computed<PreviewKind>(() => {
     if (asset.value === null) return 'unsupported'
-    if (selectedDerivative.value !== null) {
-        return kindForFormat(selectedDerivative.value.format)
+    const derivative = selectedDerivative.value
+    if (derivative !== null) {
+        return kindForFormat(derivative.format, derivative.mime_type ?? null)
     }
     return kindForMediaType(asset.value.media_type, asset.value.mime_type)
 })
@@ -158,9 +151,44 @@ const previewKind = computed<'image' | 'pdf' | 'video' | 'audio' | 'text' | 'uns
  */
 const PDF_FORMATS = new Set(['pdf'])
 
-function kindForFormat(format: string): 'image' | 'pdf' | 'unsupported' {
+/**
+ * Markdown MIME types. `md` is the derivative format spora-core emits
+ * for a document's extracted text (`PdfToMarkdownProducer`,
+ * `DocxToMarkdownProducer`), but a format slug is not
+ * self-describing — the MIME is what actually decides whether the
+ * fetched body is rendered as markdown or shown verbatim.
+ */
+const MARKDOWN_MIME_TYPES = new Set(['text/markdown', 'text/x-markdown'])
+
+/**
+ * Format slugs that denote markdown. Consulted only when the server
+ * sent no `mime_type` for the derivative (a spora-core predating
+ * `MediaAssetSerializer::buildDerivativeRows()` emitting it), so the
+ * pane still renders the `md` derivative there instead of dropping to
+ * a raw `<pre>`.
+ */
+const MARKDOWN_FORMATS = new Set(['md', 'markdown'])
+
+/**
+ * Is this (format, mime) pair markdown? The MIME wins when present —
+ * `md` could legitimately be markdown, HTML, or a future binary. The
+ * slug is a fallback for the no-MIME case only.
+ */
+function isMarkdown(format: string, mimeType: string | null): boolean {
+    if (mimeType !== null && mimeType !== '') {
+        return MARKDOWN_MIME_TYPES.has(mimeType.toLowerCase())
+    }
+    return MARKDOWN_FORMATS.has(format.toLowerCase())
+}
+
+function kindForFormat(format: string, mimeType: string | null): PreviewKind {
     const f = format.toLowerCase()
     if (PDF_FORMATS.has(f)) return 'pdf'
+    // The `md` derivative — a document's extracted text. Without this
+    // branch an `md` chip click fell through to the grey "Preview
+    // unavailable" card, leaving the derivative unreachable for a human.
+    if (isMarkdown(format, mimeType)) return 'text'
+    if (mimeType !== null && mimeType.toLowerCase().startsWith('text/')) return 'text'
     if (f.startsWith('thumbnail-')) return 'image'
     if (f.startsWith('medium-')) return 'image'
     if (f.startsWith('format-')) return 'image'
@@ -182,7 +210,7 @@ function kindForFormat(format: string): 'image' | 'pdf' | 'unsupported' {
  * chip renders the raw bytes in a `<pre>` block instead of the gray
  * "Preview unavailable for document" fallback.
  */
-function kindForMediaType(mediaType: string, mimeType: string | null): 'image' | 'video' | 'audio' | 'text' | 'unsupported' {
+function kindForMediaType(mediaType: string, mimeType: string | null): PreviewKind {
     if (mediaType === 'image') return 'image'
     if (mediaType === 'video') return 'video'
     if (mediaType === 'audio') return 'audio'
@@ -190,17 +218,31 @@ function kindForMediaType(mediaType: string, mimeType: string | null): 'image' |
     return 'unsupported'
 }
 
+/**
+ * Rendered markdown or verbatim text? Resolved from the MIME of
+ * whatever the text pane is currently showing — the active derivative
+ * when a chip is lit, else the source asset. A markdown-ish MIME gets
+ * `<MdPreview>`; every other text type keeps the raw `<pre>`, because
+ * a verbatim dump is the honest rendering of e.g. a `.typ` source.
+ */
+const isMarkdownPreview = computed<boolean>(() => {
+    const derivative = selectedDerivative.value
+    if (derivative !== null) return isMarkdown(derivative.format, derivative.mime_type ?? null)
+    return isMarkdown('', asset.value?.mime_type ?? null)
+})
+
 const lightboxRef = ref<HTMLDialogElement | null>(null)
 const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
 const toast = ref<string | null>(null)
 
 /**
- * Text-source preview state. Source bytes are fetched on demand
- * (when the operator clicks the Source chip on a `text/*` asset)
- * rather than eagerly on mount so we don't pay the fetch cost for
- * every detail page open — most of the time the operator lands
- * here via a chip click on a PDF derivative, not the source.
+ * Text-preview state. The bytes are fetched on demand (when the
+ * operator lands on a text-kind selection — the Source chip of a
+ * `text/*` asset, or an `md` / `text/*` derivative chip) rather than
+ * eagerly on mount so we don't pay the fetch cost for every detail
+ * page open — most of the time the operator lands here via a chip
+ * click on a PDF or image derivative, not on text.
  *
  * The fetch goes through the browser's native `fetch()` because
  * the host API client always parses responses as JSON; raw bytes
@@ -212,24 +254,39 @@ const textSourceLoading = ref(false)
 const textSourceError = ref<string | null>(null)
 
 /**
+ * Whose bytes the text pane shows. The active derivative when a chip
+ * is lit, else the source asset. This used to be hardcoded to
+ * `asset.asset_url`, which meant a `text` kind on a derivative (an
+ * `md` chip on a PDF) would have fetched the PDF's bytes and rendered
+ * them as mojibake in a `<pre>`.
+ */
+const selectedTextUrl = computed<string | null>(() => {
+    if (asset.value === null) return null
+    return selectedDerivative.value !== null
+        ? selectedDerivative.value.asset_url
+        : asset.value.asset_url
+})
+
+/**
  * Monotonic token for `loadTextSource` — guards against a stale fetch
- * resolving after the operator has navigated to a different asset. The
- * assetId-change watcher clears `textSource`, but if the prior fetch
- * is still in flight when the new one starts, the bytes can race back
- * in and overwrite the new asset's preview. Bumping `loadToken` on
- * each call invalidates every in-flight load; the `finally` is also
- * gated so the loading spinner only flips off for the still-current
- * request — same pattern as App.vue's `requestId`.
+ * resolving after the operator has navigated to a different asset or
+ * picked a different derivative. The watcher below clears `textSource`,
+ * but if the prior fetch is still in flight when the new one starts, the
+ * bytes can race back in and overwrite the new selection's preview.
+ * Bumping `loadToken` on each call invalidates every in-flight load; the
+ * `finally` is also gated so the loading spinner only flips off for the
+ * still-current request — same pattern as App.vue's `requestId`.
  */
 let loadToken = 0
 
 async function loadTextSource(): Promise<void> {
-    if (asset.value === null || asset.value.asset_url === '') return
+    const url = selectedTextUrl.value
+    if (url === null || url === '') return
     const myToken = ++loadToken
     textSourceLoading.value = true
     textSourceError.value = null
     try {
-        const response = await fetch(asset.value.asset_url, { credentials: 'include' })
+        const response = await fetch(url, { credentials: 'include' })
         if (myToken !== loadToken) return
         if (!response.ok) {
             throw new Error(`HTTP ${response.status} ${response.statusText}`)
@@ -247,41 +304,63 @@ async function loadTextSource(): Promise<void> {
     }
 }
 
-// Reset the cached source on navigation; the watcher below refills
-// when the operator clicks the Source chip on the new asset. We also
-// bump `loadToken` here — without it, an in-flight fetch from the
-// PREVIOUS asset can resolve between this reset and the new
-// `loadTextSource()` call (the new call only fires after `loadAsset`
-// resolves and `previewKind` recomputes), and the stale body would
-// pass the token check (`myToken === loadToken`) and write the old
-// bytes into `textSource`. The token bump happens before the next
-// `loadTextSource` invocation, so the stale guard catches it.
-watch(() => props.assetId, () => {
-    loadToken++
-    textSource.value = null
-    textSourceError.value = null
-})
+/**
+ * The asset + URL the pane last settled on, or `null` before the first
+ * run. Kept here rather than read off the watcher's `oldValue` because
+ * an `immediate` watch's first call receives Vue's `INITIAL_WATCHER_VALUE`
+ * sentinel object, not `undefined` — an `oldValue`-based "is this the
+ * first run?" test would be a lie that happens to work.
+ */
+let loadedTextTarget: string | null = null
 
-// Auto-fetch on the first time the operator lands on the Source chip
-// of a text-type asset. The watcher is `immediate` so a deep-link to
-// the detail page works without an intermediate chip click; the
-// "fetch only when needed" property is preserved because the watch
-// is gated on `previewKind === 'text'` rather than running on every
-// mount.
-watch(() => previewKind.value, (kind) => {
-    if (kind === 'text' && textSource.value === null && !textSourceLoading.value) {
+// Invalidate + (re)load the text pane in ONE watcher. These were two
+// watchers (an assetId reset and a `previewKind` auto-fetch), which
+// depended on each other's flush order and broke twice: the fetch
+// watcher fired while `asset.value` still held the previous asset, and
+// the `textSource === null` guard then refused to refetch once the new
+// asset landed — a spinner nothing clears, and never a body.
+watch(
+    () => [props.assetId, selectedTextUrl.value, previewKind.value] as const,
+    ([assetId, url, kind]) => {
+        // A different asset or a different URL means different bytes:
+        // drop the cached body and orphan any in-flight request.
+        //
+        // `loadToken` is bumped BEFORE the refetch decision so a stale
+        // response can never slip through: the abandoned request's
+        // `myToken === loadToken` check fails and its body is dropped,
+        // and its `finally` can no longer flip `textSourceLoading` — so
+        // the flag is cleared here rather than left set, which would
+        // make the guard below read "a load is already running for this
+        // selection" and skip the refetch.
+        const target = `${assetId}|${url ?? ''}`
+        if (target !== loadedTextTarget) {
+            loadedTextTarget = target
+            loadToken++
+            textSource.value = null
+            textSourceLoading.value = false
+            textSourceError.value = null
+        }
+        // `immediate` makes a deep-link to a text asset work without an
+        // intermediate chip click; the "fetch only when needed" property
+        // comes from the `kind === 'text'` gate rather than from the
+        // watch being non-immediate.
+        if (kind !== 'text' || textSource.value !== null || textSourceLoading.value) return
+        // Skip while the pane still holds the PREVIOUS asset: `props.
+        // assetId` has already moved on but `loadAsset()` has not
+        // resolved, so the URL above is the one the operator is leaving.
+        if (asset.value === null || asset.value.id !== assetId) return
         void loadTextSource()
-    }
-}, { immediate: true })
+    },
+    { immediate: true },
+)
 
 const editingField = ref<string | null>(null)
 const editValue = ref<string>('')
 const savingField = ref<string | null>(null)
 
-// Union: filename + tags use `<input>`, prompt uses `<textarea>`. The
-// markdown editor (MdEditor) is its own component and intentionally
-// excluded. `startEditing()` focuses + selects it on next tick so the
-// operator can type without clicking twice.
+// Union: filename + tags use `<input>`, prompt uses `<textarea>`.
+// `startEditing()` focuses + selects it on next tick so the operator
+// can type without clicking twice.
 const editingInput = ref<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
 async function loadAsset(): Promise<void> {
@@ -489,7 +568,7 @@ async function refreshShareToken(): Promise<void> {
     }
 }
 
-async function saveField(field: 'filename' | 'prompt' | 'tags' | 'markdown'): Promise<void> {
+async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
     if (asset.value === null) return
     let body: Record<string, unknown>
     if (field === 'filename') {
@@ -506,11 +585,6 @@ async function saveField(field: 'filename' | 'prompt' | 'tags' | 'markdown'): Pr
                 .map((t) => t.trim())
                 .filter((t) => t !== ''),
         }
-    } else if (field === 'markdown') {
-        // `editValue` tracks the editor buffer; persist verbatim. Empty string
-        // clears the field on the server — useful for re-running the
-        // extraction pipeline manually later.
-        body = { markdown_content: editValue.value }
     } else {
         body = { prompt: editValue.value }
     }
@@ -594,6 +668,11 @@ function onDerivativeProduced(derivative: MediaAsset): void {
         format: extractFormat(derivative),
         media_id: derivative.id,
         asset_url: derivative.asset_url,
+        // Mirror the server's row shape: the preview pane resolves the
+        // text/markdown branch from this MIME, so a locally-spliced
+        // derivative that omitted it would render as the grey fallback
+        // until the next `loadAsset()`.
+        mime_type: derivative.mime_type,
         producer_plugin: derivative.plugin_slug,
         producer_operation: derivative.tool_name,
         created_at: derivative.created_at,
@@ -814,19 +893,50 @@ onBeforeUnmount(() => {
                         :src="previewSrc ?? ''"
                         data-testid="media-page-audio"
                     />
-                    <pre
+                    <!--
+                        Text branch — the `md` derivative's rendered
+                        markdown, or a verbatim `<pre>` for any other text
+                        type (a `.typ` source, a `text/csv` export). The
+                        container is a div, not a `<pre>`, because the
+                        markdown branch must not inherit `font-mono`.
+                    -->
+                    <div
                         v-else-if="previewKind === 'text'"
-                        class="min-h-[160px] overflow-auto rounded-lg border border-border bg-muted p-4 text-xs font-mono leading-relaxed text-foreground lg:max-h-[70vh]"
+                        class="min-h-[160px] overflow-auto rounded-lg border border-border bg-muted p-4 text-xs leading-relaxed text-foreground lg:max-h-[70vh]"
                         data-testid="media-preview-text"
-                    ><code v-if="textSource !== null" data-testid="media-preview-text-body">{{ textSource }}</code><code
-                        v-else-if="textSourceLoading"
-                        class="text-muted-foreground"
-                        data-testid="media-preview-text-loading"
-                    >Loading source…</code><code
-                        v-else-if="textSourceError"
-                        class="text-destructive"
-                        data-testid="media-preview-text-error"
-                    >Couldn't load source: {{ textSourceError }}</code></pre>
+                    >
+                        <div
+                            v-if="isMarkdownPreview && textSource !== null"
+                            class="text-sm"
+                            data-testid="media-preview-markdown"
+                        >
+                            <MdPreview
+                                :model-value="textSource"
+                                :language="MARKDOWN_LOCALE"
+                                class="bg-transparent"
+                                data-testid="media-preview-markdown-body"
+                            />
+                        </div>
+                        <pre
+                            v-else-if="textSource !== null"
+                            class="font-mono"
+                            data-testid="media-preview-text-raw"
+                        ><code data-testid="media-preview-text-body">{{ textSource }}</code></pre>
+                        <p
+                            v-else-if="textSourceLoading"
+                            class="text-muted-foreground"
+                            data-testid="media-preview-text-loading"
+                        >
+                            Loading source…
+                        </p>
+                        <p
+                            v-else-if="textSourceError"
+                            class="text-destructive"
+                            data-testid="media-preview-text-error"
+                        >
+                            Couldn't load source: {{ textSourceError }}
+                        </p>
+                    </div>
                     <!-- Content-sized: a full-bleed box made an unrenderable file
                          look like a failed preview. -->
                     <div
@@ -866,7 +976,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <!-- Info column: actions, sharing, metadata, prompt, markdown, lifecycle. -->
+                <!-- Info column: actions, sharing, metadata, prompt, lifecycle. -->
                 <div class="flex min-w-0 flex-col gap-6" data-testid="media-detail-info-column">
                     <!-- Primary actions -->
                     <div class="flex flex-wrap gap-2">
@@ -980,15 +1090,6 @@ onBeforeUnmount(() => {
                         <dt class="text-muted-foreground">Storage</dt>
                         <dd class="col-span-2 text-foreground">{{ asset.storage_mode }}</dd>
 
-                        <template v-if="asset.has_markdown">
-                            <dt class="text-muted-foreground">Markdown</dt>
-                            <dd class="col-span-2 text-foreground">
-                                <span class="inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                                    Extracted
-                                </span>
-                            </dd>
-                        </template>
-
                         <dt class="text-muted-foreground">Tags</dt>
                         <dd v-if="editingField !== 'tags'" class="col-span-2">
                             <button
@@ -1090,89 +1191,6 @@ onBeforeUnmount(() => {
                                     :disabled="savingField !== null"
                                     class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
                                     data-testid="prompt-save"
-                                >
-                                    Save
-                                </button>
-                            </div>
-                        </form>
-                    </section>
-
-                    <!-- Markdown -->
-                    <section>
-                        <div class="mb-2 flex items-center justify-between">
-                            <h3 class="text-sm font-semibold">Markdown</h3>
-                            <div
-                                v-if="editingField !== 'markdown' && asset.markdown_content !== null"
-                                class="flex items-center gap-2"
-                            >
-                                <button
-                                    type="button"
-                                    class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
-                                    data-testid="markdown-edit-button"
-                                    @click="startEditing('markdown', asset.markdown_content)"
-                                >
-                                    Edit
-                                </button>
-                            </div>
-                        </div>
-                        <div
-                            v-if="editingField !== 'markdown' && asset.markdown_content !== null"
-                            class="rounded-md border border-border bg-background p-3 max-h-96 overflow-auto"
-                            data-testid="markdown-preview-wrapper"
-                        >
-                            <MdPreview
-                                :model-value="asset.markdown_content"
-                                :language="MARKDOWN_LOCALE"
-                                class="bg-transparent"
-                                data-testid="markdown-preview"
-                            />
-                        </div>
-                        <p
-                            v-else-if="editingField !== 'markdown'"
-                            class="rounded-md bg-muted/60 p-3 text-sm italic text-muted-foreground"
-                            data-testid="markdown-empty"
-                        >
-                            No extracted markdown yet.
-                            <button
-                                type="button"
-                                class="ml-2 not-italic text-primary underline-offset-2 hover:underline"
-                                data-testid="markdown-add-button"
-                                @click="startEditing('markdown', '')"
-                            >
-                                Add markdown
-                            </button>
-                        </p>
-                        <form
-                            v-else
-                            class="flex flex-col gap-2"
-                            data-testid="markdown-edit-form"
-                            @submit.prevent="saveField('markdown')"
-                        >
-                            <label for="media-markdown-input" class="sr-only">Markdown content</label>
-                            <MdEditor
-                                id="media-markdown-input"
-                                :model-value="editValue"
-                                :rows="12"
-                                :preview="true"
-                                :language="MARKDOWN_LOCALE"
-                                :toolbars="markdownEditorToolbars"
-                                data-testid="markdown-editor"
-                                @update:model-value="editValue = $event"
-                            />
-                            <div class="flex justify-end gap-2">
-                                <button
-                                    type="button"
-                                    class="rounded px-3 py-1 text-xs text-muted-foreground"
-                                    data-testid="markdown-cancel"
-                                    @click="cancelEdit"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    :disabled="savingField !== null"
-                                    class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
-                                    data-testid="markdown-save"
                                 >
                                     Save
                                 </button>

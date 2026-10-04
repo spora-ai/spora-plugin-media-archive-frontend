@@ -39,7 +39,6 @@ const sample: MediaAsset = {
     duration_seconds: null,
     prompt: 'a tiny pixel',
     filename: null,
-    markdown_content: null,
     tags: null,
     asset_url: 'data:image/png;base64,AAAA',
     source_url: null,
@@ -175,12 +174,17 @@ describe('MediaDetailPage', () => {
         expect(download.attributes('download')).toBe('minimax-test-1.png')
     })
 
-    it('shows the markdown extraction badge when has_markdown is true', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, has_markdown: true })
+    it('shows no markdown extraction badge or metadata row', async () => {
+        // The `Extracted` badge rode on `has_markdown`, a derived flag
+        // off the deleted `markdown_content` column. A document's
+        // extracted text is now an `md` derivative, surfaced by the
+        // `md` chip in the versions strip — the metadata `<dl>` must not
+        // claim anything about it.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample })
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        expect(wrapper.text()).toContain('Extracted')
+        expect(wrapper.text()).not.toContain('Extracted')
     })
 
     it('refetches when the assetId prop changes', async () => {
@@ -644,80 +648,6 @@ describe('MediaDetailPage', () => {
         expect(wrapper.emitted('deleted')).toBeUndefined()
     })
 
-    it('renders the markdown preview when markdown_content is set', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Hello\n\nWorld' })
-        const { hostContext } = buildHostContext(get)
-        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
-        await flushPromises()
-        const preview = wrapper.find('[data-testid="markdown-preview-wrapper"]')
-        expect(preview.exists()).toBe(true)
-        expect(preview.text()).toContain('Hello')
-    })
-
-    it('shows the markdown empty placeholder when markdown_content is null', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: null })
-        const { hostContext } = buildHostContext(get)
-        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
-        await flushPromises()
-        expect(wrapper.find('[data-testid="markdown-empty"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="markdown-preview-wrapper"]').exists()).toBe(false)
-    })
-
-    it('opens the markdown editor when the Edit button is clicked', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Hi' })
-        const { hostContext } = buildHostContext(get)
-        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
-        await flushPromises()
-        await wrapper.find('[data-testid="markdown-edit-button"]').trigger('click')
-        await flushPromises()
-        expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(true)
-    })
-
-    it('opens the markdown editor with an empty buffer when Add markdown is clicked', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: null })
-        const { hostContext } = buildHostContext(get)
-        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
-        await flushPromises()
-        await wrapper.find('[data-testid="markdown-add-button"]').trigger('click')
-        await flushPromises()
-        expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(true)
-    })
-
-    it('saves the markdown content via PATCH', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Old' })
-        const { hostContext, api } = buildHostContext(get)
-        api.patch.mockResolvedValue({ ...sample, markdown_content: '# New\n\nUpdated body' })
-        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
-        await flushPromises()
-        await wrapper.find('[data-testid="markdown-edit-button"]').trigger('click')
-        await flushPromises()
-        // The stub editor is a textarea — type into it.
-        const editor = wrapper.find('[data-testid="markdown-editor"]')
-        await editor.setValue('# New\n\nUpdated body')
-        await flushPromises()
-        const form = wrapper.find('[data-testid="markdown-edit-form"]')
-        await form.trigger('submit.prevent')
-        await flushPromises()
-        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { markdown_content: '# New\n\nUpdated body' })
-    })
-
-    it('cancels the markdown edit without saving', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, markdown_content: '# Original' })
-        const { hostContext, api } = buildHostContext(get)
-        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
-        await flushPromises()
-        await wrapper.find('[data-testid="markdown-edit-button"]').trigger('click')
-        await flushPromises()
-        const editor = wrapper.find('[data-testid="markdown-editor"]')
-        await editor.setValue('discarded content')
-        await wrapper.find('[data-testid="markdown-cancel"]').trigger('click')
-        await flushPromises()
-        expect(api.patch).not.toHaveBeenCalled()
-        expect(wrapper.find('[data-testid="markdown-edit-form"]').exists()).toBe(false)
-        // Original content still showing in preview
-        expect(wrapper.text()).toContain('Original')
-    })
-
     it('mounts the Versions strip above the preview block and reads derivatives from the asset', async () => {
         // The strip's options endpoint is also fired on mount; both
         // responses are pre-stubbed on the same `get` mock so the
@@ -982,11 +912,13 @@ describe('MediaDetailPage', () => {
         vi.unstubAllGlobals()
     })
 
-    it('treats text/plain and text/markdown as text-preview sources too', async () => {
+    it('treats any text/* source as a text preview, verbatim', async () => {
         // The mime-type branch is general — anything with a text/*
         // prefix is a text preview. Verify the breadth so future
-        // additions (text/csv, text/xml) Just Work.
-        for (const mimeType of ['text/plain', 'text/markdown', 'text/x-typst']) {
+        // additions (text/csv, text/xml) Just Work. `text/markdown` is
+        // excluded here and covered by the rendered-markdown case
+        // below, which asserts the other half of the branch.
+        for (const mimeType of ['text/plain', 'text/x-typst', 'text/csv']) {
             vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
                 ok: true,
                 status: 200,
@@ -1005,6 +937,9 @@ describe('MediaDetailPage', () => {
             const body = wrapper.find('[data-testid="media-preview-text-body"]')
             expect(body.exists()).toBe(true)
             expect(body.text()).toBe(`source for ${mimeType}`)
+            // A non-markdown text type must not be handed to the
+            // markdown renderer.
+            expect(wrapper.find('[data-testid="media-preview-markdown"]').exists()).toBe(false)
 
             vi.unstubAllGlobals()
         }
@@ -1037,14 +972,23 @@ describe('MediaDetailPage', () => {
         // `myToken === loadToken` check would pass because the
         // previous loadTextSource call set myToken BEFORE the watcher
         // bumped loadToken. The fix bumps loadToken on every
-        // loadTextSource call AND inside the assetId watcher, so the
+        // loadTextSource call AND inside the selection watcher, so the
         // stale response's guard trips and the body is dropped.
+        //
+        // The reset also releases the loading flag, so the new asset
+        // gets its OWN fetch rather than a spinner nothing clears.
         vi.useRealTimers()
         let resolveOldFetch: ((response: Response) => void) | null = null
         const fetchMock = vi.fn()
             .mockReturnValueOnce(new Promise<Response>((resolve) => {
                 resolveOldFetch = resolve
             }))
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                statusText: 'OK',
+                text: () => Promise.resolve('FRESH body'),
+            })
         vi.stubGlobal('fetch', fetchMock)
 
         const textAsset1: MediaAsset = {
@@ -1080,7 +1024,7 @@ describe('MediaDetailPage', () => {
         await wrapper.setProps({ assetId: textAsset2.id })
         await flushPromises()
         // Settle the OLD fetch last. The stale-token guard must drop
-        // the body even though the assetId watcher reset textSource.
+        // the body even though the selection watcher reset textSource.
         ;(resolveOldFetch as unknown as ((response: Response) => void) | null)?.({
             ok: true,
             status: 200,
@@ -1094,11 +1038,12 @@ describe('MediaDetailPage', () => {
         // loadToken` check would pass and overwrite textSource with
         // 'STALE body' — the user would see the previous asset's
         // bytes on the new asset's page.
-        const body = wrapper.find('[data-testid="media-preview-text-body"]')
-        expect(body.exists()).toBe(false)
+        expect(wrapper.text()).not.toContain('STALE')
+        // …and the new asset's own body is what lands on screen.
+        expect(fetchMock.mock.calls.map((c) => c[0])).toContain(textAsset2.asset_url)
+        expect(wrapper.find('[data-testid="media-preview-text-body"]').text()).toBe('FRESH body')
         const err = wrapper.find('[data-testid="media-preview-text-error"]')
         expect(err.exists()).toBe(false)
-        expect(wrapper.text()).not.toContain('STALE')
 
         vi.unstubAllGlobals()
     })
@@ -1247,4 +1192,351 @@ describe('MediaDetailPage', () => {
         expect(wrapper.text()).not.toContain("won't be auto-purged")
     })
 
+})
+
+// The `md` derivative replaced the `markdown_content` column, so the
+// extracted text now reaches the operator through the preview pane
+// rather than a metadata field. Three gaps had to be closed for that to
+// work; each is pinned below.
+describe('MediaDetailPage — md derivative preview', () => {
+    const PDF_SOURCE: MediaAsset = {
+        ...sample,
+        id: 'doc-1',
+        media_type: 'document',
+        mime_type: 'application/pdf',
+        filename: 'report.pdf',
+        asset_url: '/api/v1/assets/doc-1.pdf',
+    }
+
+    function makeMarkdownDerivative(overrides: Partial<MediaDerivative> = {}): MediaDerivative {
+        return {
+            format: 'md',
+            label: 'Markdown',
+            media_id: 'derivative-md-1',
+            asset_url: '/api/v1/assets/derivative-md-1.md',
+            mime_type: 'text/markdown',
+            producer_plugin: 'spora-core',
+            producer_operation: 'pdf_to_markdown',
+            created_at: '2026-01-01T00:00:01.000Z',
+            ...overrides,
+        }
+    }
+
+    /**
+     * Mount with the given derivatives and a `fetch` that answers each
+     * URL with a distinct body, so a test can prove WHICH selection's
+     * bytes ended up on screen.
+     */
+    function mountWithDerivatives(derivatives: MediaDerivative[], bodies: Record<string, string>) {
+        const fetchMock = vi.fn((url: string) => {
+            const body = bodies[url] ?? `no body registered for ${url}`
+            return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(body) })
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...PDF_SOURCE, derivatives })
+            // VersionsStrip fires the options endpoint on mount.
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: PDF_SOURCE.id, hostContext } })
+        return { wrapper, fetchMock }
+    }
+
+    afterEach(() => {
+        vi.unstubAllGlobals()
+    })
+
+    // --- gap 1: kindForFormat had no `text` branch -----------------------
+
+    it('resolves a text kind for an md derivative from its mime, not the format slug', async () => {
+        // `kindForFormat` used to return 'image' | 'pdf' | 'unsupported',
+        // so an `md` chip click landed on the grey "Preview unavailable"
+        // card and the derivative was unreachable for a human.
+        const derivative = makeMarkdownDerivative()
+        const { wrapper } = mountWithDerivatives([derivative], {
+            [derivative.asset_url]: '# Quarterly\n\nRevenue up 12%.',
+        })
+        await flushPromises()
+        await flushPromises()
+
+        // The PDF source itself has no inline preview — that is the
+        // card the `md` chip click has to replace.
+        expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(true)
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-preview-text"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(false)
+    })
+
+    it('reads the derivative mime rather than the md slug, so an md-format binary does not render as text', async () => {
+        // `md` is not self-describing. A producer that emits binary bytes
+        // under the `md` slug (mime `application/octet-stream`) must NOT
+        // be fetched as text — the MIME is the real signal.
+        const derivative = makeMarkdownDerivative({ mime_type: 'application/octet-stream' })
+        const { wrapper, fetchMock } = mountWithDerivatives([derivative], {})
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-preview-text"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(true)
+        expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('falls back to the format slug when the core sends no derivative mime_type', async () => {
+        // A spora-core predating `MediaAssetSerializer` emitting
+        // `mime_type` on derivative rows still yields a previewable `md`
+        // chip — the slug is the fallback, not the source of truth.
+        const derivative = makeMarkdownDerivative({ mime_type: null })
+        const { wrapper } = mountWithDerivatives([derivative], {
+            [derivative.asset_url]: '# Title',
+        })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-preview-text"]').exists()).toBe(true)
+    })
+
+    it('previews a non-markdown text derivative verbatim', async () => {
+        // A `text/csv` derivative is text, but rendering it through the
+        // markdown renderer would mangle it. The MIME decides both the
+        // kind and the renderer.
+        const derivative = makeMarkdownDerivative({
+            format: 'csv',
+            mime_type: 'text/csv',
+            asset_url: '/api/v1/assets/derivative-csv-1.csv',
+        })
+        const { wrapper } = mountWithDerivatives([derivative], {
+            [derivative.asset_url]: 'a,b\n1,2',
+        })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-preview-text-raw"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-preview-text-body"]').text()).toBe('a,b\n1,2')
+        expect(wrapper.find('[data-testid="media-preview-markdown"]').exists()).toBe(false)
+    })
+
+    // --- gap 2: loadTextSource fetched the source, not the derivative ----
+
+    it('fetches the selected derivative URL, not the source asset URL', async () => {
+        // `loadTextSource` used to fetch `asset.asset_url` unconditionally.
+        // With a `text` kind on a derivative that meant the PDF's bytes
+        // being fetched and dumped into a `<pre>`.
+        const derivative = makeMarkdownDerivative()
+        const { wrapper, fetchMock } = mountWithDerivatives([derivative], {
+            [derivative.asset_url]: 'derivative body',
+            [PDF_SOURCE.asset_url]: 'source body',
+        })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        const urls = fetchMock.mock.calls.map((c) => c[0])
+        expect(urls).toContain(derivative.asset_url)
+        expect(urls).not.toContain(PDF_SOURCE.asset_url)
+        expect(wrapper.find('[data-testid="media-preview-markdown"]').text()).toContain('derivative body')
+    })
+
+    it('refetches when the operator switches from one text derivative to another', async () => {
+        // The old watcher keyed on `previewKind` alone, which does not
+        // change between two `text` selections, and its
+        // `textSource === null` guard would have refused the refetch even
+        // if it had fired. Both derivatives' bytes must never mix.
+        const first = makeMarkdownDerivative()
+        const second = makeMarkdownDerivative({
+            media_id: 'derivative-md-2',
+            asset_url: '/api/v1/assets/derivative-md-2.md',
+        })
+        const { wrapper } = mountWithDerivatives([first, second], {
+            [first.asset_url]: 'FIRST body',
+            [second.asset_url]: 'SECOND body',
+        })
+        await flushPromises()
+        await flushPromises()
+
+        const chips = wrapper.findAll('[data-testid="versions-derivative-chip"]')
+        expect(chips).toHaveLength(2)
+
+        await chips[0]!.trigger('click')
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-preview-markdown"]').text()).toContain('FIRST body')
+
+        await chips[1]!.trigger('click')
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-preview-markdown"]').text()).toContain('SECOND body')
+        expect(wrapper.text()).not.toContain('FIRST body')
+    })
+
+    it('refetches the source bytes when the operator returns to the Source chip', async () => {
+        const derivative = makeMarkdownDerivative()
+        const { wrapper, fetchMock } = mountWithDerivatives([derivative], {
+            [derivative.asset_url]: 'derivative body',
+            [PDF_SOURCE.asset_url]: 'source body',
+        })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.text()).toContain('derivative body')
+
+        await wrapper.find('[data-testid="versions-source"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        // Back on the PDF source: the fallback card, and no stale
+        // derivative body on screen.
+        expect(wrapper.find('[data-testid="media-preview-fallback"]').exists()).toBe(true)
+        expect(wrapper.text()).not.toContain('derivative body')
+        expect(fetchMock).not.toHaveBeenCalledWith(PDF_SOURCE.asset_url, expect.anything())
+    })
+
+    it('discards an in-flight derivative fetch when the chip changes mid-flight', async () => {
+        // The monotonic `loadToken` guard extends to chip changes, not
+        // just navigation: a slow first derivative must not overwrite
+        // the second one's body.
+        let resolveFirst: ((response: unknown) => void) | null = null
+        const first = makeMarkdownDerivative()
+        const second = makeMarkdownDerivative({
+            media_id: 'derivative-md-2',
+            asset_url: '/api/v1/assets/derivative-md-2.md',
+        })
+        const fetchMock = vi.fn((url: string) => {
+            if (url === first.asset_url) {
+                return new Promise((resolve) => {
+                    resolveFirst = resolve
+                })
+            }
+            return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('SECOND body') })
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...PDF_SOURCE, derivatives: [first, second] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: PDF_SOURCE.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        const chips = wrapper.findAll('[data-testid="versions-derivative-chip"]')
+        await chips[0]!.trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-preview-text-loading"]').exists()).toBe(true)
+
+        await chips[1]!.trigger('click')
+        await flushPromises()
+        await flushPromises()
+        // The late first response arrives after the switch.
+        ;(resolveFirst as unknown as ((response: unknown) => void) | null)?.({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve('STALE first body'),
+        })
+        await flushPromises()
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-preview-markdown"]').text()).toContain('SECOND body')
+        expect(wrapper.text()).not.toContain('STALE')
+    })
+
+    // --- gap 3: the text branch rendered a raw <pre> ---------------------
+
+    it('renders the md derivative as markdown, not a raw <pre>', async () => {
+        // Replacement for the deleted `markdown-preview-wrapper` case:
+        // the body is handed to `<MdPreview>` (stubbed in tests/setup.ts)
+        // so the operator sees headings, lists and tables instead of a
+        // font-mono dump of the markdown source.
+        const derivative = makeMarkdownDerivative()
+        const { wrapper } = mountWithDerivatives([derivative], {
+            [derivative.asset_url]: '# Quarterly Earnings\n\nRevenue grew **12%**.\n\n- Cloud: +18%\n',
+        })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        const markdown = wrapper.find('[data-testid="media-preview-markdown"]')
+        expect(markdown.exists()).toBe(true)
+        // The body is handed to the real `<MdPreview>` component (the
+        // `data-md-preview` attribute comes from the stub in
+        // tests/setup.ts), not dumped into the branch's own markup.
+        const rendered = markdown.find('[data-md-preview="true"]')
+        expect(rendered.exists()).toBe(true)
+        expect(rendered.text()).toContain('# Quarterly Earnings')
+        // The verbatim branch is NOT used for a markdown mime.
+        expect(wrapper.find('[data-testid="media-preview-text-raw"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-preview-text-body"]').exists()).toBe(false)
+    })
+
+    it('renders a markdown-typed source in the preview pane too', async () => {
+        // `create_media` originals land here (`MediaType::fromMime`
+        // → `document`), so the rendered branch covers both ends of the
+        // pipeline, not just the derivative.
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve('# Source\n\nbody'),
+        }))
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                ...sample,
+                media_type: 'document',
+                mime_type: 'text/markdown',
+                derivatives: [],
+            })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-preview-markdown"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-preview-text-raw"]').exists()).toBe(false)
+    })
+
+    it('surfaces the text-fetch error for a derivative too', async () => {
+        const derivative = makeMarkdownDerivative()
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('network down')))
+        const get = vi.fn()
+            .mockResolvedValueOnce({ ...PDF_SOURCE, derivatives: [derivative] })
+            .mockResolvedValueOnce([])
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: PDF_SOURCE.id, hostContext } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="versions-derivative-chip"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        const err = wrapper.find('[data-testid="media-preview-text-error"]')
+        expect(err.exists()).toBe(true)
+        expect(err.text()).toContain('network down')
+        expect(wrapper.find('[data-testid="media-preview-markdown"]').exists()).toBe(false)
+    })
 })
