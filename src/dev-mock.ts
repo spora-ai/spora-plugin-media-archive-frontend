@@ -17,11 +17,7 @@ interface MockAsset extends MediaAsset {
     user_id: number
 }
 
-/**
- * Body of the demo PDF's `md` derivative — a document's extracted text.
- * Served from a `data:` URL so the dev sandbox can `fetch()` it (the mock
- * API serves no bytes), matching the real fetch-on-demand path.
- */
+// The demo PDF's `md` body, on a `data:` URL because the mock API serves no bytes.
 const DEMO_MARKDOWN = [
     '# Quarterly Earnings Summary',
     '',

@@ -33,13 +33,7 @@ export interface MediaDerivative {
     label?: string
     media_id: string
     asset_url: string
-    /**
-     * MIME of the derivative's own `media_assets` row, as emitted by
-     * `MediaAssetSerializer::buildDerivativeRows()`. The preview pane
-     * resolves "is this text? is it markdown?" from it, not from the
-     * format slug. Optional so an older core that predates the field
-     * still deserialises; consumers fall back to the slug.
-     */
+    /** MIME of the derivative's own `media_assets` row; absent on a core predating it, where consumers fall back to the slug. */
     mime_type?: string | null
     producer_plugin: string | null
     producer_operation: string | null
@@ -89,9 +83,6 @@ export interface MediaAsset {
      * `$includeDerivatives` flag controls whether the controller can
      * opt out of the JOIN on tight listing loops. The frontend never
      * sets this itself; it reads what the server returned.
-     *
-     * An `md` entry is a document's extracted text, rendered by the
-     * detail page's preview pane.
      */
     derivatives: MediaDerivative[]
 }

@@ -16,18 +16,11 @@ import {
 import type { MediaAsset, MediaDerivative } from '../types'
 import type { PluginHostContext } from '../shims'
 import { MdPreview } from 'md-editor-v3'
-// Global side-effect import, kept: `<MdPreview>` needs the markdown
-// typography subset of this stylesheet (headings, lists, tables, code
-// blocks). The editor chrome is dead weight we accept rather than
-// reimplement a renderer.
+// Deliberately kept although the editor is gone: `<MdPreview>` needs its typography.
 import 'md-editor-v3/lib/style.css'
 import VersionsStrip from '../components/VersionsStrip.vue'
 
-/**
- * Locale for the markdown preview. `md-editor-v3` ships Chinese as the
- * default; pin to en-US so the rendered markup and screen-reader text
- * are consistent with the rest of the admin UI.
- */
+// `md-editor-v3` defaults to Chinese; pin the preview to en-US.
 const MARKDOWN_LOCALE = 'en-US'
 
 const props = defineProps<{
@@ -97,11 +90,7 @@ const previewAlt = computed<string>(() => {
         : base
 })
 
-/**
- * Definite height, not `max-h-*`: the img's percentage `max-h-full`
- * computes to `none` against an auto-height parent, so the image
- * overflows and `overflow-hidden` crops it.
- */
+// Definite height, not `max-h-*`: a percentage `max-h-full` computes to `none` against an auto-height parent, and `overflow-hidden` then crops the image.
 const previewSurfaceClass = 'flex h-[40vh] min-h-[220px] w-full lg:h-[70vh]'
 
 const previewUnavailableLabel = computed<string>(() => {
@@ -114,16 +103,10 @@ const previewUnavailableLabel = computed<string>(() => {
 type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'
 
 /**
- * What element to render in the preview pane. Branches on the
- * SELECTED derivative's format + mime_type when one is active, else on
- * the source asset's media_type + mime_type. The previous implementation
- * only branched on `asset.media_type`, which meant a `.typ` source
- * with a freshly-produced PDF derivative rendered the wrong branch —
- * the `<img>` only existed inside `v-if="media_type === 'image'"`,
- * so the chip click silently changed `selectedDerivativeId` without
- * updating the DOM. Now the chip click on any format swap lands on
- * an element that can render it (PDF → download card, raster → img,
- * text → fetched body).
+ * What element the selection needs: the SELECTED derivative's format + mime_type
+ * when one is active, else the source asset's media_type + mime_type. Keying on the
+ * asset alone left a PDF derivative on a `.typ` source unrenderable — pinned by the
+ * "renders a PDF derivative in a download card" test.
  */
 const previewKind = computed<PreviewKind>(() => {
     if (asset.value === null) return 'unsupported'
@@ -146,18 +129,9 @@ const PDF_FORMATS = new Set(['pdf'])
 
 const MARKDOWN_MIME_TYPES = new Set(['text/markdown', 'text/x-markdown'])
 
-/**
- * Fallback for a core that predates `mime_type` on derivative rows
- * (`MediaAssetSerializer::buildDerivativeRows()` gained it in spora-core
- * #285). An `md` slug must still preview on an older server.
- */
+// Fallback for a core predating `mime_type` on derivative rows (spora-core #285).
 const MARKDOWN_FORMATS = new Set(['md', 'markdown'])
 
-/**
- * Is this (format, mime) pair markdown? The MIME wins when the server
- * sent one — `md` is a producer-chosen slug and could be HTML or binary.
- * The slug only decides the no-MIME case.
- */
 function isMarkdown(format: string, mimeType: string | null): boolean {
     if (mimeType !== null && mimeType !== '') {
         return MARKDOWN_MIME_TYPES.has(mimeType.toLowerCase())
@@ -199,11 +173,6 @@ function kindForMediaType(mediaType: string, mimeType: string | null): PreviewKi
     return 'unsupported'
 }
 
-/**
- * Rendered markdown or verbatim? A markdown-ish MIME gets
- * `<MdPreview>`; every other text type keeps the raw `<pre>`, because
- * a verbatim dump is the honest rendering of e.g. a `.typ` source.
- */
 const isMarkdownPreview = computed<boolean>(() => {
     const derivative = selectedDerivative.value
     if (derivative !== null) return isMarkdown(derivative.format, derivative.mime_type ?? null)
@@ -215,27 +184,11 @@ const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
 const toast = ref<string | null>(null)
 
-/**
- * Text-preview state. The bytes are fetched on demand (when the
- * operator lands on a text-kind selection — the Source chip of a
- * `text/*` asset, or an `md` / `text/*` derivative chip) rather than
- * eagerly on mount, so a detail page opened on a PDF or image pays
- * nothing.
- *
- * The fetch goes through the browser's native `fetch()` because the host
- * API client always parses responses as JSON; raw bytes need to bypass
- * that wrapper. The asset endpoint is authenticated via session cookie,
- * so `credentials: 'include'` is enough.
- */
+// Raw bytes, so native `fetch()`: the host API client parses every response as JSON.
 const textSource = ref<string | null>(null)
 const textSourceLoading = ref(false)
 const textSourceError = ref<string | null>(null)
 
-/**
- * Whose bytes the text pane shows: the lit chip's derivative, else the
- * source. Hardcoding `asset.asset_url` here fetched the PDF's bytes for
- * an `md` chip on a PDF and dumped them as mojibake in a `<pre>`.
- */
 const selectedTextUrl = computed<string | null>(() => {
     if (asset.value === null) return null
     return selectedDerivative.value !== null
@@ -243,14 +196,7 @@ const selectedTextUrl = computed<string | null>(() => {
         : asset.value.asset_url
 })
 
-/**
- * Monotonic token for `loadTextSource` — guards against a stale fetch
- * resolving after the operator moved to a different asset or derivative
- * and overwriting the new selection's body. Bumped on every call to
- * invalidate every in-flight load; the `finally` is gated on the same
- * check so only the current request flips the spinner off — same
- * pattern as App.vue's `requestId`.
- */
+// Monotonic, bumped on every load: an in-flight load of a different selection must never write its body. Pinned by the "discards a stale text-source fetch" test.
 let loadToken = 0
 
 async function loadTextSource(): Promise<void> {
@@ -278,29 +224,14 @@ async function loadTextSource(): Promise<void> {
     }
 }
 
-/**
- * The `${assetId}|${url}` the pane last settled on, or `null` before the
- * first run. Not read off the watcher's `oldValue`: an `immediate` watch
- * passes Vue's `INITIAL_WATCHER_VALUE` sentinel, not `undefined`, so a
- * first-run test built on it would be a lie that happens to work.
- */
+// The `${assetId}|${url}` the pane last settled on, or `null` before the first run — not the watcher's `oldValue`, which an `immediate` watch fills with `INITIAL_WATCHER_VALUE`, not `undefined`.
 let loadedTextTarget: string | null = null
 
-// Invalidate + (re)load in ONE watcher. As two watchers these depended on
-// each other's flush order: the fetch watcher fired while `asset.value`
-// still held the PREVIOUS asset, then the `textSource === null` guard
-// refused the refetch once the new asset landed — a spinner nothing
-// clears, and never a body.
+// One watcher, not two: split, the fetch fires while `asset.value` still holds the previous asset and the `textSource === null` guard below then refuses the refetch. Pinned by the "switches from one text derivative to another" test.
 watch(
     () => [props.assetId, selectedTextUrl.value, previewKind.value] as const,
     ([assetId, url, kind]) => {
-        // Different asset or URL means different bytes: drop the cached
-        // body and orphan any in-flight request. The token bump comes
-        // BEFORE the refetch decision so a stale response can never slip
-        // through, and the loading flag is reset here because the
-        // abandoned request's gated `finally` can no longer clear it —
-        // left set, the guard below would read "a load is already
-        // running" and skip the refetch.
+        // Bump + clear here, BEFORE the refetch decision: the abandoned request's gated `finally` can no longer clear the flag, and a stuck flag makes the guard below skip the refetch.
         const target = `${assetId}|${url ?? ''}`
         if (target !== loadedTextTarget) {
             loadedTextTarget = target
@@ -309,12 +240,8 @@ watch(
             textSourceLoading.value = false
             textSourceError.value = null
         }
-        // `immediate` makes a deep-link to a text asset work without an
-        // intermediate chip click; "fetch only when needed" comes from the
-        // `kind === 'text'` gate, not from a non-immediate watch.
+        // `immediate` so a deep-link to a text asset previews without a chip click; the `kind === 'text'` gate is what spares a PDF or image the fetch.
         if (kind !== 'text' || textSource.value !== null || textSourceLoading.value) return
-        // `props.assetId` has moved on but `loadAsset()` has not resolved,
-        // so the URL above is the one the operator is leaving.
         if (asset.value === null || asset.value.id !== assetId) return
         void loadTextSource()
     },
@@ -325,9 +252,6 @@ const editingField = ref<string | null>(null)
 const editValue = ref<string>('')
 const savingField = ref<string | null>(null)
 
-// Union: filename + tags use `<input>`, prompt uses `<textarea>`.
-// `startEditing()` focuses + selects it on next tick so the operator
-// can type without clicking twice.
 const editingInput = ref<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
 async function loadAsset(): Promise<void> {
@@ -635,10 +559,7 @@ function onDerivativeProduced(derivative: MediaAsset): void {
         format: extractFormat(derivative),
         media_id: derivative.id,
         asset_url: derivative.asset_url,
-        // Mirror the server's row shape: the preview pane resolves the
-        // text/markdown branch from this MIME, so a derivative whose
-        // slug doesn't self-describe (a `text/csv` export) would show the
-        // grey fallback until the next `loadAsset()`.
+        // The preview pane resolves the text/markdown branch from this MIME, not from the slug.
         mime_type: derivative.mime_type,
         producer_plugin: derivative.plugin_slug,
         producer_operation: derivative.tool_name,
@@ -860,8 +781,7 @@ onBeforeUnmount(() => {
                         :src="previewSrc ?? ''"
                         data-testid="media-page-audio"
                     />
-                    <!-- The container is a div, not a `<pre>`: the
-                         markdown branch must not inherit `font-mono`. -->
+                    <!-- A div, not a `<pre>`: the markdown branch must not inherit `font-mono`. -->
                     <div
                         v-else-if="previewKind === 'text'"
                         class="min-h-[160px] overflow-auto rounded-lg border border-border bg-muted p-4 text-xs leading-relaxed text-foreground lg:max-h-[70vh]"
@@ -938,7 +858,6 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <!-- Info column: actions, sharing, metadata, prompt, lifecycle. -->
                 <div class="flex min-w-0 flex-col gap-6" data-testid="media-detail-info-column">
                     <!-- Primary actions -->
                     <div class="flex flex-wrap gap-2">
