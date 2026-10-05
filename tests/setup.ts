@@ -8,11 +8,8 @@
  *   library would try to fetch external CSS from unpkg.com. We replace
  *   `<MdPreview>` — the only export the detail page still uses, to render
  *   an `md` derivative in the preview pane — with a lightweight stub that
- *   exposes the source markdown, so consumers can still assert on what
- *   the preview was handed without a real renderer.
- *
- *   The stub survives the removal of the operator markdown `<MdEditor>`:
- *   the module is a dependency, not a per-component choice.
+ *   exposes the source markdown, so tests can assert on what the preview
+ *   was handed without a real renderer.
  */
 /* eslint-disable vue/require-prop-types --
    This is a Vitest stub for an external library; it intentionally

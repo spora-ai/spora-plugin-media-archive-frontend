@@ -18,13 +18,9 @@ interface MockAsset extends MediaAsset {
 }
 
 /**
- * Body of the demo PDF's `md` derivative. This is where a document's
- * extracted text lives now that `media_assets.markdown_content` is
- * gone: a real `media_assets` row joined through `media_derivatives`,
- * rendered by the detail page's preview pane. Served from a `data:`
- * URL so the dev sandbox can actually `fetch()` it (the mock API does
- * not serve bytes) — the same fetch-on-demand path a real derivative
- * takes.
+ * Body of the demo PDF's `md` derivative — a document's extracted text.
+ * Served from a `data:` URL so the dev sandbox can `fetch()` it (the mock
+ * API serves no bytes), matching the real fetch-on-demand path.
  */
 const DEMO_MARKDOWN = [
     '# Quarterly Earnings Summary',

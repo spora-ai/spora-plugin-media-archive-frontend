@@ -35,12 +35,9 @@ export interface MediaDerivative {
     asset_url: string
     /**
      * MIME of the derivative's own `media_assets` row, as emitted by
-     * `MediaAssetSerializer::buildDerivativeRows()`.
-     *
-     * The preview pane resolves "is this text? is it markdown?" from
-     * this rather than from `format`, because a format slug is not
-     * self-describing — `md` in particular could be markdown, HTML,
-     * or a future binary. Optional so a core that predates the field
+     * `MediaAssetSerializer::buildDerivativeRows()`. The preview pane
+     * resolves "is this text? is it markdown?" from it, not from the
+     * format slug. Optional so an older core that predates the field
      * still deserialises; consumers fall back to the slug.
      */
     mime_type?: string | null
@@ -93,9 +90,8 @@ export interface MediaAsset {
      * opt out of the JOIN on tight listing loops. The frontend never
      * sets this itself; it reads what the server returned.
      *
-     * An `md` entry is a document's extracted text — the derivative
-     * that replaced the old `markdown_content` column. The detail
-     * page renders it in the preview pane, not in a metadata field.
+     * An `md` entry is a document's extracted text, rendered by the
+     * detail page's preview pane.
      */
     derivatives: MediaDerivative[]
 }

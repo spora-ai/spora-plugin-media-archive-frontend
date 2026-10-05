@@ -175,11 +175,9 @@ describe('MediaDetailPage', () => {
     })
 
     it('shows no markdown extraction badge or metadata row', async () => {
-        // The `Extracted` badge rode on `has_markdown`, a derived flag
-        // off the deleted `markdown_content` column. A document's
-        // extracted text is now an `md` derivative, surfaced by the
-        // `md` chip in the versions strip — the metadata `<dl>` must not
-        // claim anything about it.
+        // The badge rode on `has_markdown`. The extracted text now lives in
+        // the `md` derivative, surfaced by the versions strip — don't
+        // bring the badge back.
         const get = vi.fn().mockResolvedValueOnce({ ...sample })
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
@@ -1194,10 +1192,6 @@ describe('MediaDetailPage', () => {
 
 })
 
-// The `md` derivative replaced the `markdown_content` column, so the
-// extracted text now reaches the operator through the preview pane
-// rather than a metadata field. Three gaps had to be closed for that to
-// work; each is pinned below.
 describe('MediaDetailPage — md derivative preview', () => {
     const PDF_SOURCE: MediaAsset = {
         ...sample,
@@ -1246,8 +1240,6 @@ describe('MediaDetailPage — md derivative preview', () => {
     afterEach(() => {
         vi.unstubAllGlobals()
     })
-
-    // --- gap 1: kindForFormat had no `text` branch -----------------------
 
     it('resolves a text kind for an md derivative from its mime, not the format slug', async () => {
         // `kindForFormat` used to return 'image' | 'pdf' | 'unsupported',
@@ -1330,8 +1322,6 @@ describe('MediaDetailPage — md derivative preview', () => {
         expect(wrapper.find('[data-testid="media-preview-text-body"]').text()).toBe('a,b\n1,2')
         expect(wrapper.find('[data-testid="media-preview-markdown"]').exists()).toBe(false)
     })
-
-    // --- gap 2: loadTextSource fetched the source, not the derivative ----
 
     it('fetches the selected derivative URL, not the source asset URL', async () => {
         // `loadTextSource` used to fetch `asset.asset_url` unconditionally.
@@ -1461,13 +1451,7 @@ describe('MediaDetailPage — md derivative preview', () => {
         expect(wrapper.text()).not.toContain('STALE')
     })
 
-    // --- gap 3: the text branch rendered a raw <pre> ---------------------
-
     it('renders the md derivative as markdown, not a raw <pre>', async () => {
-        // Replacement for the deleted `markdown-preview-wrapper` case:
-        // the body is handed to `<MdPreview>` (stubbed in tests/setup.ts)
-        // so the operator sees headings, lists and tables instead of a
-        // font-mono dump of the markdown source.
         const derivative = makeMarkdownDerivative()
         const { wrapper } = mountWithDerivatives([derivative], {
             [derivative.asset_url]: '# Quarterly Earnings\n\nRevenue grew **12%**.\n\n- Cloud: +18%\n',
@@ -1481,9 +1465,8 @@ describe('MediaDetailPage — md derivative preview', () => {
 
         const markdown = wrapper.find('[data-testid="media-preview-markdown"]')
         expect(markdown.exists()).toBe(true)
-        // The body is handed to the real `<MdPreview>` component (the
-        // `data-md-preview` attribute comes from the stub in
-        // tests/setup.ts), not dumped into the branch's own markup.
+        // `data-md-preview` comes from the `<MdPreview>` stub in
+        // tests/setup.ts, so this proves the real component was used.
         const rendered = markdown.find('[data-md-preview="true"]')
         expect(rendered.exists()).toBe(true)
         expect(rendered.text()).toContain('# Quarterly Earnings')
