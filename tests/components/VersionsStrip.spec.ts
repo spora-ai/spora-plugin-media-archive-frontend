@@ -15,7 +15,6 @@ const baseAsset: MediaAsset = {
     duration_seconds: null,
     prompt: 'A source image',
     filename: 'source.png',
-    markdown_content: null,
     tags: null,
     asset_url: '/api/v1/assets/parent-1.png',
     source_url: null,

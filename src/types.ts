@@ -33,6 +33,8 @@ export interface MediaDerivative {
     label?: string
     media_id: string
     asset_url: string
+    /** MIME of the derivative's own `media_assets` row; absent on a core predating it, where consumers fall back to the slug. */
+    mime_type?: string | null
     producer_plugin: string | null
     producer_operation: string | null
     created_at: string | null
@@ -51,18 +53,6 @@ export interface MediaAsset {
     duration_seconds: number | null
     prompt: string | null
     filename: string | null
-    /**
-     * Extracted markdown body (populated by the upload pipeline for documents
-     * — see `PdfToMarkdownConverter`, `PlainTextPassthroughConverter`). The
-     * frontend renders it via `md-editor-v3`'s `<MdPreview>` for display and
-     * `<MdEditor>` for inline editing; `null` means no extraction happened.
-     *
-     * The older `has_markdown` boolean is kept as a derived flag so older
-     * clients that don't read the body still see the extraction indicator;
-     * it stays in sync on the server side (`MediaAssetSerializer`).
-     */
-    markdown_content: string | null
-    has_markdown?: boolean
     tags: string[] | null
     asset_url: string
     source_url: string | null

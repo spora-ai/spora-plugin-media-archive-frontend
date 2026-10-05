@@ -17,6 +17,21 @@ interface MockAsset extends MediaAsset {
     user_id: number
 }
 
+// The demo PDF's `md` body, on a `data:` URL because the mock API serves no bytes.
+const DEMO_MARKDOWN = [
+    '# Quarterly Earnings Summary',
+    '',
+    'Revenue grew **12%** year-over-year to $1.4B.',
+    '',
+    '## Segment breakdown',
+    '',
+    '- Cloud: +18%',
+    '- Hardware: -3%',
+    '- Services: +9%',
+    '',
+    'See the appendix for the full P&L.',
+].join('\n')
+
 export const FIXTURE: MockAsset[] = [
     {
         id: 'demo-1',
@@ -29,7 +44,6 @@ export const FIXTURE: MockAsset[] = [
         duration_seconds: null,
         prompt: 'A serene alpine lake at golden hour',
         filename: null,
-        markdown_content: null,
         tags: null,
         asset_url: 'https://placehold.co/600x400/png',
         source_url: 'https://example.com/cdn/foo.png',
@@ -53,7 +67,6 @@ export const FIXTURE: MockAsset[] = [
         duration_seconds: 12.5,
         prompt: 'Welcome to the daily briefing',
         filename: null,
-        markdown_content: null,
         tags: null,
         asset_url: 'https://placehold.co/600x400/mp3',
         source_url: null,
@@ -77,7 +90,6 @@ export const FIXTURE: MockAsset[] = [
         duration_seconds: null,
         prompt: 'A product photo on a marble counter',
         filename: null,
-        markdown_content: null,
         tags: null,
         asset_url: 'https://placehold.co/600x400/jpeg',
         source_url: null,
@@ -101,7 +113,6 @@ export const FIXTURE: MockAsset[] = [
         duration_seconds: 45.2,
         prompt: 'A drone shot of a coastal city at dusk',
         filename: null,
-        markdown_content: null,
         tags: null,
         asset_url: 'https://placehold.co/600x400/mp4',
         source_url: null,
@@ -125,19 +136,6 @@ export const FIXTURE: MockAsset[] = [
         duration_seconds: null,
         prompt: 'Quarterly earnings summary',
         filename: null,
-        markdown_content: [
-            '# Quarterly Earnings Summary',
-            '',
-            'Revenue grew **12%** year-over-year to $1.4B.',
-            '',
-            '## Segment breakdown',
-            '',
-            '- Cloud: +18%',
-            '- Hardware: -3%',
-            '- Services: +9%',
-            '',
-            'See the appendix for the full P&L.',
-        ].join('\n'),
         tags: null,
         asset_url: 'https://placehold.co/600x400/pdf',
         source_url: null,
@@ -148,7 +146,18 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't5',
         tool_call_id: 'tc5',
         created_at: new Date(Date.now() - 172800000).toISOString(),
-        derivatives: [],
+        derivatives: [
+            {
+                format: 'md',
+                label: 'Markdown',
+                media_id: 'demo-5-md',
+                asset_url: `data:text/markdown;charset=utf-8,${encodeURIComponent(DEMO_MARKDOWN)}`,
+                mime_type: 'text/markdown',
+                producer_plugin: 'spora-core',
+                producer_operation: 'pdf_to_markdown',
+                created_at: new Date(Date.now() - 172700000).toISOString(),
+            },
+        ],
     },
 ]
 
