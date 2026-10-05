@@ -636,8 +636,9 @@ function onDerivativeProduced(derivative: MediaAsset): void {
         media_id: derivative.id,
         asset_url: derivative.asset_url,
         // Mirror the server's row shape: the preview pane resolves the
-        // text/markdown branch from this MIME, so omitting it here would
-        // render the grey fallback until the next `loadAsset()`.
+        // text/markdown branch from this MIME, so a derivative whose
+        // slug doesn't self-describe (a `text/csv` export) would show the
+        // grey fallback until the next `loadAsset()`.
         mime_type: derivative.mime_type,
         producer_plugin: derivative.plugin_slug,
         producer_operation: derivative.tool_name,
