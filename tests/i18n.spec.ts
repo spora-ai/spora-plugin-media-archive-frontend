@@ -6,6 +6,7 @@ import MediaFilters from '../src/components/MediaFilters.vue'
 import en from '../src/locales/en.json'
 import de from '../src/locales/de.json'
 import { messages } from '../src/i18n'
+import type { PluginHostContext } from '../src/shims'
 
 /**
  * The catalogue's own invariants, and the wiring that makes a German
@@ -49,13 +50,16 @@ describe('German rendering', () => {
         const wrapper = mount(App, {
             props: {
                 hostContext: {
+                    // The host's API is generic in its response type, so a
+                    // mock of it has to be cast: a concrete return type is
+                    // not assignable to `Promise<T>`.
                     api: {
                         get: async () => ({ assets: [], page: 1, perPage: 24, total: 0, lastPage: 1 }),
                         post: async () => ({}),
                         postForm: async () => ({}),
                         patch: async () => ({}),
                         delete: async () => ({}),
-                    },
+                    } as unknown as PluginHostContext['api'],
                     pinia: null,
                     theme: 'light',
                     locale: 'de',
