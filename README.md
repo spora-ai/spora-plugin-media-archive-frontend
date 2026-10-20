@@ -68,6 +68,14 @@ npm run i18n:check     # the CI gate: catalogue drift, missing keys, untranslate
 
 `npm run i18n:check` also fails on operator-facing copy that is not wrapped in `t()`, so a new string cannot ship untranslated by accident.
 
+### Catalogue grammar
+
+This panel's rule 0 asks vue-i18n's own message compiler whether a key compiles, so the catalogue may use the interpolation syntax it was always meant to: `{name}` and the `|` plural separator. Fifteen keys in `de.json` do.
+
+The **host's** extractor is stricter — it rejects any key carrying a raw `{`, `}` or `|`, and the host's own catalogue therefore holds no unescaped placeholder. The two grammars never meet: this panel's catalogue is read by this panel's extractor, the host's by the host's, and the host's `i18n:check` harvests the framework's own sources and never opens a plugin's catalogue.
+
+That makes the difference a contract divergence rather than a break, and vue-i18n compiles at render either way. It is also stable under the merge: a key *is* the English source text, so a string present in both catalogues carries the same placeholders in both. Do not rewrite this panel's keys to satisfy the host's rule, and do not loosen the host's rule to match this one.
+
 ## Mount contract
 
 The IIFE bundle installs `window.SporaAppMediaArchive` (the PascalCase of the slug) with two methods:
