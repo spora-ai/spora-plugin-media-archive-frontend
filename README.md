@@ -55,11 +55,24 @@ npm run dev   # vite dev server on :5174
 
 The host SPA's `vite.config.ts` proxies `/plugins/spora-plugin-media-archive-frontend` to `:5174` so editing `src/*` updates the panel without rebuilding the host. See `docs.spora-ai.com/develop/plugins/authoring-frontend` for the dev workflow.
 
+The dev sandbox reads `?locale=de` from the query string, so the panel can be rendered in German without a backend.
+
+## Translations
+
+The panel ships its own catalogue under `src/locales/`. `en.json` is generated from the source — the key *is* the English string — and `de.json` is hand-edited.
+
+```bash
+npm run i18n:extract   # regenerate src/locales/en.json
+npm run i18n:check     # the CI gate: catalogue drift, missing keys, untranslated copy
+```
+
+`npm run i18n:check` also fails on operator-facing copy that is not wrapped in `t()`, so a new string cannot ship untranslated by accident.
+
 ## Mount contract
 
 The IIFE bundle installs `window.SporaAppMediaArchive` (the PascalCase of the slug) with two methods:
 
-- `mount(target: HTMLElement, hostContext)` — create the app, install local Pinia, mount into the host's slot.
+- `mount(target: HTMLElement, hostContext)` — create the app, install local Pinia and the plugin's own i18n instance, mount into the host's slot.
 - `unmount(target: HTMLElement)` — tear down.
 
 The host's `apps/registry.ts` reads both. The bundle names **must** stay aligned with `media-archive` → `SporaAppMediaArchive` (see `vite.config.ts → build.lib.name`).

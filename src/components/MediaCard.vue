@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Image, FileAudio, FileVideo, FileText } from 'lucide-vue-next'
 import type { MediaAsset } from '../types'
 import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 
 const props = defineProps<{ asset: MediaAsset }>()
+
+const { t } = useI18n()
 
 const isImage = computed(() => props.asset.media_type === 'image')
 const isAudio = computed(() => props.asset.media_type === 'audio')
@@ -76,12 +79,12 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
                 class="pointer-events-none absolute right-2 top-2 z-10 inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 ring-1 ring-amber-500/20"
                 data-testid="media-card-temporary-badge"
             >
-                Temporary
+                {{ t('Temporary') }}
             </span>
             <img
                 v-if="isImage"
                 :src="asset.asset_url"
-                :alt="asset.prompt ?? 'Archived'"
+                :alt="asset.prompt ?? t('Archived')"
                 class="h-full w-full object-contain bg-background"
                 loading="lazy"
             />

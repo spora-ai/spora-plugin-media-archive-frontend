@@ -22,6 +22,7 @@ function buildHostContext(get: ReturnType<typeof vi.fn>): {
     const hostContext: PluginHostContext = {
         api: api as unknown as PluginHostContext['api'],
         pinia: null,
+        locale: 'en',
         theme: 'light',
         route: null,
         router: null,

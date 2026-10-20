@@ -135,6 +135,7 @@ function buildContext(
         // call site) while satisfying vue-tsc's stricter overload check.
         api: api as unknown as PluginHostContext['api'],
         pinia: null,
+        locale: 'en',
         theme: 'light',
         route: { path: initialPath, params: {}, query: {} } as unknown as PluginHostContext['route'],
         router: router as unknown as PluginHostContext['router'],

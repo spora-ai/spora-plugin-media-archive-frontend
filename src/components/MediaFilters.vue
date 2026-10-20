@@ -19,6 +19,7 @@
  * API client. The parent owns the `load()` call.
  */
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Image, FileAudio, FileVideo, FileText, Search, User, LayoutGrid, Users } from 'lucide-vue-next'
 import type { MediaPrincipal, MediaType } from '../types'
 import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
@@ -69,18 +70,26 @@ const emit = defineEmits<{
     (event: 'update:scope', value: Scope): void
 }>()
 
+const { t } = useI18n()
+
 interface TypePill {
     value: MediaType | ''
     label: string
     icon: typeof Image
 }
 
+/**
+ * `Audio` and `Video` are ordinary German words as well as English ones,
+ * so they are left as they are — the catalogue has nothing to add to
+ * them, and a German value identical to the key would be an untranslated
+ * placeholder.
+ */
 const pills: TypePill[] = [
-    { value: '', label: 'All', icon: Search },
-    { value: 'image', label: 'Images', icon: Image },
+    { value: '', label: t('All'), icon: Search },
+    { value: 'image', label: t('Images'), icon: Image },
     { value: 'audio', label: 'Audio', icon: FileAudio },
     { value: 'video', label: 'Video', icon: FileVideo },
-    { value: 'document', label: 'Documents', icon: FileText },
+    { value: 'document', label: t('Documents'), icon: FileText },
 ]
 
 const selected = computed(() => props.type)
@@ -93,21 +102,20 @@ const selected = computed(() => props.type)
  * `Group #${id}`, which is exactly the bug the user reported.
  */
 const scopeChips = computed<ReadonlyArray<ScopeChip>>(() => {
-    const out: ScopeChip[] = [{ id: null, label: 'All', icon: LayoutGrid }]
-    const mySuffix = props.myMediaLabel !== null && props.myMediaLabel !== undefined && props.myMediaLabel !== ''
-        ? ` (${props.myMediaLabel})`
-        : ''
+    const out: ScopeChip[] = [{ id: null, label: t('All'), icon: LayoutGrid }]
     for (const principal of props.principals) {
         if (principal.type === 'user') {
             out.push({
                 id: principal.id,
-                label: `My Media${mySuffix}`,
+                label: props.myMediaLabel
+                    ? t('My Media ({name})', { name: props.myMediaLabel })
+                    : t('My Media'),
                 icon: User,
             })
             continue
         }
         // group-principal
-        const label = props.groupLabels[principal.id] ?? `Group #${principal.id}`
+        const label = props.groupLabels[principal.id] ?? t('Group #{id}', { id: principal.id })
         out.push({
             id: principal.id,
             label,
@@ -192,13 +200,13 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
         </div>
 
         <label class="relative block">
-            <span class="sr-only">Search</span>
+            <span class="sr-only">{{ t('Search') }}</span>
             <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
                 type="search"
                 :value="search"
-                aria-label="Search"
-                placeholder="Search prompts and tags…"
+                :aria-label="t('Search')"
+                :placeholder="t('Search prompts and tags…')"
                 class="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 data-testid="media-search"
                 @input="emit('update:search', ($event.target as HTMLInputElement).value)"
@@ -213,7 +221,7 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
                 data-testid="media-show-temporary"
                 @change="toggleShowTemporary"
             />
-            Include temporary files
+            {{ t('Include temporary files') }}
         </label>
     </div>
 </template>

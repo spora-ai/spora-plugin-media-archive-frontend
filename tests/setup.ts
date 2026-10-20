@@ -10,6 +10,17 @@
 /* eslint-disable vue/require-prop-types -- external-library stub; array props mirror the real API without its CodeMirror 6 types. */
 
 import { vi } from 'vitest'
+import { config } from '@vue/test-utils'
+import { createPluginI18n } from '../src/i18n'
+
+// Install vue-i18n on every mounted component, pinned to `en`.
+//
+// `en.json` is a generated identity map (`"Save": "Save"`), so `t('Save')`
+// renders the English source it was handed and the assertions on literal
+// UI copy keep passing unmodified. The instance is built here rather than
+// imported from `src/i18n` so a locale left behind on a developer's
+// machine can never change what the suite asserts.
+config.global.plugins = [createPluginI18n('en')]
 
 vi.mock('md-editor-v3', async () => {
     const { defineComponent, h } = await import('vue')

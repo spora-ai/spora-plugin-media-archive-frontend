@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import type { PluginHostContext } from './shims'
+import { createPluginI18n } from './i18n'
 
 /**
  * Plugin mount/unmount contract.
@@ -24,6 +25,10 @@ const SporaApp = {
         const app = createApp(App, { hostContext })
         const localPinia = createPinia()
         app.use(localPinia)
+        // The plugin owns its catalogue, so it builds its own instance —
+        // the host does not publish its own. The host's locale is only
+        // the initial value.
+        app.use(createPluginI18n(hostContext.locale))
         // Stash the host's Pinia on `globalProperties` so any component can
         // reach it via `this.$host.pinia` without polluting `provide`/`inject`
         // keys that the host also uses.
