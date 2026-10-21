@@ -185,23 +185,19 @@ describe('MediaDetailPage', () => {
 
     it('refetches when the assetId prop changes', async () => {
         const get = vi.fn()
-            // Initial detail page load.
             .mockResolvedValueOnce(sample)
             // VersionsStrip fires the options endpoint on mount (one per
             // detail-page load).
             .mockResolvedValueOnce([])
-            // setProps → second detail page load.
             .mockResolvedValueOnce({ ...sample, id: 'test-2', filename: 'two.png' })
             // VersionsStrip fires the options endpoint again on id change.
             .mockResolvedValueOnce([])
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
         await flushPromises()
-        // Two fetches: the asset + the VersionsStrip options endpoint.
         expect(get).toHaveBeenCalledTimes(2)
         await wrapper.setProps({ assetId: 'test-2' })
         await flushPromises()
-        // Two more fetches: the new asset + the options endpoint again.
         expect(get).toHaveBeenCalledTimes(4)
         expect(get.mock.calls[2]?.[0]).toBe('/media/test-2')
         expect(wrapper.find('[data-testid="media-detail-filename"]').text()).toContain('two.png')
@@ -690,25 +686,19 @@ describe('MediaDetailPage', () => {
         await flushPromises()
         await flushPromises()
 
-        // The source asset is rendered by default.
         const previewImg = wrapper.find('[data-testid="media-preview-img"]')
         expect(previewImg.exists()).toBe(true)
         expect(previewImg.attributes('src')).toBe(sample.asset_url)
-        // No "Viewing derivative" badge while the source is selected.
         expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(false)
 
-        // Click the derivative chip.
         const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
         await chip.trigger('click')
         await flushPromises()
 
-        // The preview now points at the derivative's asset_url.
         const swapped = wrapper.find('[data-testid="media-preview-img"]')
         expect(swapped.attributes('src')).toBe(derivative.asset_url)
-        // And the operator can see they've navigated off the source.
         expect(wrapper.find('[data-testid="media-preview-derivative-badge"]').exists()).toBe(true)
 
-        // Click the Source chip to come back.
         const sourceChip = wrapper.find('[data-testid="versions-source"]')
         await sourceChip.trigger('click')
         await flushPromises()
@@ -777,10 +767,7 @@ describe('MediaDetailPage', () => {
         await flushPromises()
         await flushPromises()
 
-        // Source branch should NOT match (no <img> for a document).
         expect(wrapper.find('[data-testid="media-preview-figure"]').exists()).toBe(false)
-        // Click the PDF chip — the download card appears and the (now
-        // removed) iframe branch does not.
         const chip = wrapper.find('[data-testid="versions-derivative-chip"]')
         await chip.trigger('click')
         await flushPromises()
@@ -795,11 +782,6 @@ describe('MediaDetailPage', () => {
         // a "click to zoom" hint); PDFs use the download card directly.
         expect(wrapper.find('[data-testid="media-preview-figure"]').exists()).toBe(false)
 
-        // Click Source to come back — the download card disappears and
-        // the text-type source chip fetches its raw bytes. The
-        // `textSourceLoading`/`textSourceError`/<pre> branches each
-        // have their own test below; here we just verify the download
-        // card is gone and the source-side preview surface is up.
         await wrapper.find('[data-testid="versions-source"]').trigger('click')
         await flushPromises()
         expect(wrapper.find('[data-testid="media-preview-pdf"]').exists()).toBe(false)
@@ -1097,10 +1079,8 @@ describe('MediaDetailPage', () => {
         // arg, matching the existing refresh-public-token test
         // convention for endpoints that take no body.
         expect(api.post).toHaveBeenCalledWith(`/media/${sample.id}/keep`, undefined)
-        // Toast text surfaces the action's outcome.
         expect(wrapper.text()).toContain("won't be auto-purged")
         // The handler re-fetches the asset to pick up is_temporary=false.
-        // `get` was called three times: initial load + options + refetch.
         const mediaCalls = get.mock.calls.filter((c) => c[0] === `/media/${sample.id}`)
         expect(mediaCalls.length).toBe(2)
     })
@@ -1129,7 +1109,6 @@ describe('MediaDetailPage', () => {
         expect(midButton.exists()).toBe(true)
         expect(midButton.attributes('disabled')).toBeDefined()
 
-        // Settle the in-flight request — button re-enables.
         ;(resolvePost as unknown as ((value: MediaAsset) => void) | null)?.({ ...sample, is_temporary: false })
         await flushPromises()
         await flushPromises()

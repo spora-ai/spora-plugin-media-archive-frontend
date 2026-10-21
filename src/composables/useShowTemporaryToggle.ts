@@ -11,8 +11,8 @@
  * Persistence is keyed under `spora.media.showTemporary.v1` so a
  * future format change can bump to `v2` without colliding with
  * existing users' saved state. The `.v1` suffix is the convention
- * used elsewhere in the Spora codebase for versioned localStorage
- * keys (see `spora-frontend`'s theme + density toggles).
+ * used elsewhere in the Spora codebase for versioned localStorage keys
+ * (see `spora-frontend`'s `spora.groups.recent.v1`).
  *
  * `localStorage` access is wrapped because the composable may be
  * imported during SSR, inside a Safari private window (where
@@ -51,8 +51,7 @@ function writeToStorage(value: boolean): void {
 const showTemporary = ref<boolean>(readFromStorage())
 
 // Module-level side effect: persist every change. The watcher is
-// registered once at module load (the `watch()` call lives outside
-// `useShowTemporaryToggle`), so repeated calls to the composable
+// registered once at module load, so repeated calls to the composable
 // reuse the same subscription and never stack new ones.
 watch(showTemporary, (next) => {
     writeToStorage(next)
@@ -78,9 +77,9 @@ export function useShowTemporaryToggle(): ShowTemporaryToggle {
 
 /**
  * Test-only helper: reset the singleton's value to the documented
- * default and remove the persisted entry. Production code never
- * calls this — `tests/setup.ts`-adjacent specs use it in `beforeEach`
- * so the toggle starts off regardless of which test ran first.
+ * default and remove the persisted entry. Production code never calls
+ * this — specs use it in `beforeEach` so the toggle starts off
+ * regardless of which test ran first.
  */
 export function __resetShowTemporaryToggleForTesting(): void {
     showTemporary.value = false

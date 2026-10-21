@@ -4,15 +4,10 @@
  *
  * The scope chip row mirrors `spora-frontend/src/components/dashboard
  * /DashboardFilterChips.vue`: ALL / My Media / Group A / Group B / ...,
- * single-select, click-the-active-chip-to-clear. The principal list the
- * parent passes in `principals` came from `GET /principals/me`, which
- * carries the `type: 'user' | 'group'` discriminator — that's the only
+ * single-select, click-the-active-chip-to-clear. The `type:
+ * 'user' | 'group'` discriminator the parent passes in is the only
  * thing that lets us label the user-principal as `My Media` instead of
- * the `Group #${id}` fallback. The previous shape (`scopes: number[]`)
- * collapsed that information and rendered the user-principal with a
- * misleading group label; the controller's intersection would still
- * filter correctly server-side, but the UI was lying about what was
- * selected.
+ * the `Group #${id}` fallback.
  *
  * The component is purely presentational: it emits `update:scope` with
  * the chosen principal id (or `null` for ALL) and never touches the
@@ -27,11 +22,8 @@ import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 type Scope = number | null
 
 interface ScopeChip {
-    /** Stable discriminator — `null` is ALL, a number is the principal id. */
     id: Scope
-    /** Visible label. */
     label: string
-    /** Lucide icon component for the chip's leading slot. */
     icon: typeof LayoutGrid
 }
 
@@ -42,8 +34,7 @@ const props = defineProps<{
      * Full list of principals the caller can act as, as returned by
      * `GET /principals/me`. The `type` field drives the chip label —
      * `user` → "My Media", `group` → `groupLabels[p.id]` with a
-     * `Group #${id}` fallback. Order matters: the user-principal
-     * (`type=user`) is what the `My Media` chip picks out.
+     * `Group #${id}` fallback.
      */
     principals: MediaPrincipal[]
     selectedScope: Scope
@@ -97,9 +88,8 @@ const selected = computed(() => props.type)
 /**
  * ALL chip + one chip per principal. The user-principal is rendered
  * with the `My Media` label (no fallback) regardless of whether
- * `groupLabels` has an entry — the old code used `groupLabels[id]`
- * for every principal and silently demoted the user-principal to
- * `Group #${id}`, which is exactly the bug the user reported.
+ * `groupLabels` has an entry — using `groupLabels[id]` for every
+ * principal silently demoted the user-principal to `Group #${id}`.
  */
 const scopeChips = computed<ReadonlyArray<ScopeChip>>(() => {
     const out: ScopeChip[] = [{ id: null, label: t('All'), icon: LayoutGrid }]
@@ -114,7 +104,6 @@ const scopeChips = computed<ReadonlyArray<ScopeChip>>(() => {
             })
             continue
         }
-        // group-principal
         const label = props.groupLabels[principal.id] ?? t('Group #{id}', { id: principal.id })
         out.push({
             id: principal.id,

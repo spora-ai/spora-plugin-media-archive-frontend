@@ -46,8 +46,7 @@ const sizeKb = computed(() => {
  * One chip per distinct `format` already produced for this asset.
  * The card never deduplicates by `(format, producer)` — a Typst PDF
  * and an image-converter PDF render different bytes, and the operator
- * cares which is which. The card opts for the simpler "one chip per
- * format" affordance; the detail page's `VersionsStrip` is where the
+ * cares which is which. The detail page's `VersionsStrip` is where the
  * per-producer choice lives.
  */
 interface DerivativeChip {

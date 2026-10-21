@@ -10,16 +10,6 @@
  * foreign ids; this dialog just gives the operator a way to pick one
  * from the caller's chip row.
  *
- * Resolution chain for the default principal id (when
- * `defaultPrincipalId` is `null`):
- *  1. The currently-active scope chip in `App.vue` (user-principal or
- *     a specific group).
- *  2. The caller's user-principal — every authenticated user has at
- *     least one, by definition.
- *  3. The first group-principal — covers single-group tenants whose
- *     user-principal is missing for legacy reasons.
- *  4. Dialog disabled when no principal resolves.
- *
  * The component is plugin-agnostic: it only knows about the wire
  * shapes in `../types.ts` and the two API endpoints
  * (`/media/allowed-types` for the `<input accept>` attribute and
@@ -40,7 +30,7 @@ interface AllowedTypes {
 interface Props {
     /**
      * The host context exposes the typed REST client. Plugin code never
-     * imports from `@/composables/...` — it goes through `hostContext`
+     * imports the host's composables — it goes through `hostContext`
      * to keep dependency surfaces auditable.
      */
     hostContext: PluginHostContext

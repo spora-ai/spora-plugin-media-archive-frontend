@@ -9,20 +9,6 @@
  * name. Any `MediaDerivativeProducerInterface` registered in core is
  * reflected in the dropdown; the chip row mirrors what the controller
  * already returned on the source asset.
- *
- * Behaviour:
- *  - One chip per pre-baked derivative (the source row is always
- *    first; rendered as the "active" chip while the user hasn't
- *    picked a derivative).
- *  - Each chip click emits `select` with the chosen derivative's
- *    `media_id` (the source emits the parent asset id).
- *  - The dropdown lists every option the core
- *    `/media/{id}/derivatives/options` endpoint returned;
- *    unavailable options are disabled.
- *  - Selecting an available option calls `produce()` via the
- *    `useMediaDerivatives` composable and emits `produced` with the
- *    new/refreshed derivative asset so the parent can splice it into
- *    `asset.derivatives`.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -117,10 +103,9 @@ function chipLabel(derivative: { format: string, label?: string }): string {
 }
 
 function onChipClick(derivativeId: string): void {
-    // Parent owns `selectedDerivativeId` so the strip can mirror the
-    // preview pane without duplicate state. Just forward the click —
-    // `MediaDetailPage.vue`'s `onDerivativeSelected` decides what the
-    // id maps to (source row → `'source'`, derivative row → media_id).
+    // Parent owns `selectedDerivativeId`; `MediaDetailPage.vue`'s
+    // `onDerivativeSelected` decides what the id maps to (source row →
+    // `'source'`, derivative row → media_id).
     emit('select', derivativeId)
 }
 

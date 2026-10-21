@@ -1,7 +1,4 @@
 /**
- * Detect whether the current host route points to a media-archive asset
- * detail page, and extract the asset id if so.
- *
  * The plugin is mounted as a leaf under `/apps/media-archive`; the host
  * router does not register a child route for `asset/:id`. We let the URL
  * drive the render and parse the path ourselves — browser back/forward,

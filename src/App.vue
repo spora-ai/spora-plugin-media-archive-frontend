@@ -2,22 +2,15 @@
 /**
  * App.vue — Media Archive plugin shell.
  *
- * Owns:
- *  - the page/grid state (assets, loading, error, total, query)
- *  - the scope chip row state (visible principals, group labels, the
- *    single-pick filter)
- *  - the imperative route tracking (`router.afterEach`) so card clicks
- *    flip between the grid and the asset detail page without a remount
- *
  * The plugin is mounted as a leaf under `/apps/media-archive`; the host
  * router does not register a child route for `asset/:id`. We read the
  * current path reactively and toggle between grid and detail. Browser
  * back/forward, hard refresh, and URL sharing all work because the URL
  * is the source of truth — see `lib/route-detection.ts`.
  *
- * Scope filter: see `MediaFilters.vue` for the chip row visuals; the
- * backend contract is `GET /api/v1/media?principal_id=…` (repeatable),
- * intersected server-side with the caller's visible principals by
+ * Scope filter: the backend contract is
+ * `GET /api/v1/media?principal_id=…` (repeatable), intersected
+ * server-side with the caller's visible principals by
  * `MediaArchiveController::applyPrincipalScope()`.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -44,7 +37,6 @@ import './style.css'
 /** `null` is the "ALL" pick — see `MediaListQuery` for the semantics. */
 type SelectedScope = number | null
 
-/** `fetchPage()` reconcile mode — replace the grid or append a page. */
 type LoadMode = 'replace' | 'append'
 
 const props = defineProps<{ hostContext: PluginHostContext }>()
@@ -57,11 +49,9 @@ const api = computed(() => props.hostContext.api)
 // `watch` — fails because the plugin and the host ship separate `vue`
 // packages: when Vue wraps `hostContext` in `reactive()` for the
 // plugin's props, the host's `shallowRef` ends up behind a reactive
-// proxy whose `.value` getter doesn't subscribe to the ref's
-// internal dep list. `afterEach` is an imperative callback fired from
-// Vue Router's own nav pipeline, so it sidesteps reactivity entirely.
-// The `currentRoute.value.path` read for the initial value works
-// because it only reads once at mount.
+// proxy whose `.value` getter doesn't subscribe to the ref's internal
+// dep list. `afterEach` is an imperative callback fired from Vue
+// Router's own nav pipeline, so it sidesteps reactivity entirely.
 const routePath = ref<string>(
     props.hostContext.router?.currentRoute?.value?.path ?? '/apps/media-archive',
 )
@@ -80,20 +70,18 @@ const query = ref<MediaListQuery>({
  * Selected principal id for the scope chip row. `null` is "ALL" — we
  * pass every visible principal id to the API so the user's uploads
  * plus every group they belong to surface. A number is a single
- * principal (the user's user-principal for "My Media", a group's
- * group-principal for "Group X").
+ * principal.
  */
 const selectedScope = ref<SelectedScope>(null)
 
 /**
  * Principals the caller can act as. Seeded from `GET /principals/me`
  * (the user's user-principal + every group-principal of which they're a
- * member). The full shape carries the `type: 'user' | 'group'`
- * discriminator — `MediaFilters` needs that to label the user-principal
- * chip `My Media` rather than `Group #${id}`. The values come from
- * spora-core and are safe to send back without re-intersecting — the
- * controller does its own `visiblePrincipalIds()` intersection as the
- * last line of defence.
+ * member). The `type: 'user' | 'group'` discriminator is what lets
+ * `MediaFilters` label the user-principal chip `My Media` rather than
+ * `Group #${id}`. The values come from spora-core and are safe to send
+ * back without re-intersecting — the controller does its own
+ * `visiblePrincipalIds()` intersection as the last line of defence.
  */
 const visiblePrincipals = ref<MediaPrincipal[]>([])
 
@@ -106,25 +94,19 @@ const visiblePrincipals = ref<MediaPrincipal[]>([])
  */
 const groupLabelsByPrincipalId = ref<Record<number, string>>({})
 
-/** Tracks whether the scope-bootstrap fetch is still pending. */
 const scopeLoading = ref(false)
 
 const total = ref(0)
 
-/**
- * `lastPage` is read from the most recent `MediaListResponse` so the
- * "Load more" button can disable itself when no more pages remain. The
- * controller already computes it server-side; we just cache it.
- */
+/** Cached from the last `MediaListResponse` so "Load more" can disable itself at the last page. */
 const lastPage = ref(1)
 
 const loadingMore = ref(false)
 
 /**
- * Include-temporary-files toggle. Persisted in localStorage by the
- * composable; `MediaFilters` owns the UI surface that mutates the
- * ref, this component owns the wire-side effect (sending the query
- * param and reloading the grid on flip).
+ * Include-temporary-files toggle. `MediaFilters` owns the UI surface
+ * that mutates the ref; this component owns the wire-side effect
+ * (sending the query param and reloading the grid on flip).
  */
 const { showTemporary } = useShowTemporaryToggle()
 
@@ -154,8 +136,7 @@ const isOnDetailPage = computed(() => activeAssetId.value !== null)
  * changes. When the user flips type/search/scope faster than the network
  * replies, only the latest result is allowed to update the grid. The
  * `finally` block is intentionally NOT gated — see `fetchPage`'s
- * docblock — because each mode owns a distinct indicator and resetting
- * a superseded request's flag cannot collide with the latest one's.
+ * docblock.
  */
 let requestId = 0
 
@@ -183,8 +164,7 @@ function principalIdsForRequest(): number[] {
  * filter change) or append a new page (Load more). The body is the
  * shared lifecycle (request-id guard, error capture, loading-flag
  * toggle); the per-mode work — URL building and asset reconciliation
- * — lives in `buildPageParams()` and `reconcileAssets()` so this
- * function stays under Sonar's cognitive-complexity threshold.
+ * — lives in `buildPageParams()` and `reconcileAssets()`.
  *
  * The `finally` always clears the flag for THIS request's mode —
  * never gated by `requestId`. A stale `finally` only ever touches the
@@ -222,10 +202,7 @@ async function fetchPage(page: number, mode: LoadMode): Promise<void> {
 }
 
 /**
- * Build the `/media?…` query string for the next request. Pulled out
- * of `fetchPage` so the caller's request-id guard and error branch
- * stay readable. The `principal_id[]` array form is required — see
- * the comment on the `append()` call below.
+ * Build the `/media?…` query string for the next request.
  */
 function buildPageParams(page: number): URLSearchParams {
     const params = new URLSearchParams()
@@ -270,11 +247,6 @@ function reconcileAssets(response: MediaListResponse, mode: LoadMode): void {
     assets.value = assets.value.concat(fresh)
 }
 
-/**
- * Toggle the matching loading indicator for the current mode —
- * `replace` flips the full-screen `loading` flag; `append` flips
- * `loadingMore` so the "Load more" button can show its own spinner.
- */
 function setLoadingFlag(mode: LoadMode, value: boolean): void {
     if (mode === 'replace') {
         loading.value = value
@@ -325,8 +297,6 @@ async function bootstrapScope(): Promise<void> {
             return
         }
         visiblePrincipals.value = principals
-        // Index labels by principal id (not group id) so the chip
-        // picker can resolve a name via the principal it carries.
         const labels: Record<number, string> = {}
         for (const g of groups) {
             if (g.principal_id !== null) {
@@ -356,9 +326,7 @@ function setScope(next: SelectedScope): void {
 }
 
 /**
- * Card click: push the URL to the asset detail route. The host router
- * does not need to know about this sub-route — see
- * `lib/route-detection.ts` for the path-based detection.
+ * Card click: push the URL to the asset detail route.
  */
 function select(asset: MediaAsset): void {
     const router = props.hostContext.router
@@ -396,9 +364,7 @@ function onAssetDeleted(id: string): void {
 /**
  * Open the upload modal. Triggered from the header "Upload" button
  * AND from the grid's empty-state CTA via `MediaGrid`'s `upload-click`
- * event. The grid-to-header handoff keeps the trigger colocated with
- * the affordance that introduced it (a header button for the active
- * scope; a CTA when the grid is empty).
+ * event.
  */
 function openUploadDialog(): void {
     uploadDialogOpen.value = true
@@ -436,7 +402,6 @@ onMounted(async () => {
     }
 })
 
-// Refresh the grid whenever the user navigates back from a detail page.
 watch(activeAssetId, (id) => {
     if (id === null) {
         void load()
