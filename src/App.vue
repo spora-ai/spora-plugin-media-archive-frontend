@@ -21,6 +21,7 @@
  * `MediaArchiveController::applyPrincipalScope()`.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { FileAudio, FileVideo, FileText, Image, Search, Upload } from 'lucide-vue-next'
 import type { PluginHostContext } from './shims'
 import type {
@@ -47,6 +48,8 @@ type SelectedScope = number | null
 type LoadMode = 'replace' | 'append'
 
 const props = defineProps<{ hostContext: PluginHostContext }>()
+
+const { t } = useI18n()
 
 const api = computed(() => props.hostContext.api)
 // Listen to host navigations imperatively via `router.afterEach`. The
@@ -478,11 +481,11 @@ onBeforeUnmount(() => {
                         @click="openUploadDialog"
                     >
                         <Upload class="h-3.5 w-3.5" />
-                        Upload
+                        {{ t('Upload') }}
                     </button>
                 </div>
                 <p class="text-sm text-muted-foreground">
-                    {{ total }} {{ total === 1 ? 'asset' : 'assets' }} in your archive.
+                    {{ t('{count} asset | {count} assets in your archive.', { count: total }) }}
                 </p>
             </header>
 
@@ -497,9 +500,9 @@ onBeforeUnmount(() => {
                 @update:scope="setScope"
             />
 
-            <div v-if="loading" class="text-sm text-muted-foreground">Loading media…</div>
+            <div v-if="loading" class="text-sm text-muted-foreground">{{ t('Loading media…') }}</div>
             <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                Failed to load media: {{ error }}
+                {{ t('Failed to load media: {error}', { error }) }}
             </div>
             <template v-else>
                 <MediaGrid :assets="assets" @select="select" @upload-click="openUploadDialog" />
@@ -519,17 +522,17 @@ onBeforeUnmount(() => {
                             v-if="loadingMore"
                             class="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
                         />
-                        {{ loadingMore ? 'Loading…' : 'Load more' }}
+                        {{ loadingMore ? t('Loading…') : t('Load more') }}
                     </button>
                     <p class="text-xs text-muted-foreground" data-testid="media-load-more-meta">
-                        Showing {{ assets.length }} of {{ total }}
+                        {{ t('Showing {shown} of {total}', { shown: assets.length, total }) }}
                     </p>
                     <p
                         v-if="appendError"
                         class="text-xs text-destructive"
                         data-testid="media-load-more-error"
                     >
-                        Couldn't load more: {{ appendError }}
+                        {{ t("Couldn't load more: {error}", { error: appendError }) }}
                     </p>
                 </div>
             </template>

@@ -55,11 +55,32 @@ npm run dev   # vite dev server on :5174
 
 The host SPA's `vite.config.ts` proxies `/plugins/spora-plugin-media-archive-frontend` to `:5174` so editing `src/*` updates the panel without rebuilding the host. See `docs.spora-ai.com/develop/plugins/authoring-frontend` for the dev workflow.
 
+The dev sandbox reads `?locale=de` from the query string, so the panel can be rendered in German without a backend.
+
+## Translations
+
+The panel ships its own catalogue under `src/locales/`. `en.json` is generated from the source — the key *is* the English string — and `de.json` is hand-edited.
+
+```bash
+npm run i18n:extract   # regenerate src/locales/en.json
+npm run i18n:check     # the CI gate: catalogue drift, missing keys, untranslated copy
+```
+
+`npm run i18n:check` also fails on operator-facing copy that is not wrapped in `t()`, so a new string cannot ship untranslated by accident.
+
+### Catalogue grammar
+
+This panel's rule 0 asks vue-i18n's own message compiler whether a key compiles, so the catalogue may use the interpolation syntax it was always meant to: `{name}` and the `|` plural separator. Fifteen keys in `de.json` do.
+
+The **host's** extractor is stricter — it rejects any key carrying a raw `{`, `}` or `|`, and the host's own catalogue therefore holds no unescaped placeholder. The two grammars never meet: this panel's catalogue is read by this panel's extractor, the host's by the host's, and the host's `i18n:check` harvests the framework's own sources and never opens a plugin's catalogue.
+
+That makes the difference a contract divergence rather than a break, and vue-i18n compiles at render either way. It is also stable under the merge: a key *is* the English source text, so a string present in both catalogues carries the same placeholders in both. Do not rewrite this panel's keys to satisfy the host's rule, and do not loosen the host's rule to match this one.
+
 ## Mount contract
 
 The IIFE bundle installs `window.SporaAppMediaArchive` (the PascalCase of the slug) with two methods:
 
-- `mount(target: HTMLElement, hostContext)` — create the app, install local Pinia, mount into the host's slot.
+- `mount(target: HTMLElement, hostContext)` — create the app, install local Pinia and the plugin's own i18n instance, mount into the host's slot.
 - `unmount(target: HTMLElement)` — tear down.
 
 The host's `apps/registry.ts` reads both. The bundle names **must** stay aligned with `media-archive` → `SporaAppMediaArchive` (see `vite.config.ts → build.lib.name`).

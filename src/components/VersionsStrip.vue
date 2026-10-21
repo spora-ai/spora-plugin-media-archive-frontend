@@ -25,6 +25,7 @@
  *    `asset.derivatives`.
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import type { MediaAsset } from '../types'
 import type { PluginHostContext } from '../shims'
@@ -52,6 +53,8 @@ const emit = defineEmits<{
     (event: 'select', mediaId: string): void
     (event: 'produced', derivative: MediaAsset): void
 }>()
+
+const { t } = useI18n()
 
 const mediaId = computed(() => props.asset.id)
 const { options, produce } = useMediaDerivatives(props.hostContext, mediaId)
@@ -162,7 +165,7 @@ async function convertTo(format: string): Promise<void> {
                 data-testid="versions-source"
                 @click="onChipClick(asset.id)"
             >
-                Source
+                {{ t('Source') }}
             </button>
             <button
                 v-for="derivative in asset.derivatives"
@@ -175,7 +178,7 @@ async function convertTo(format: string): Promise<void> {
                         : 'border-border bg-background text-muted-foreground hover:text-foreground'
                 "
                 :data-format="derivative.format"
-                :title="`${derivative.format} — click to preview`"
+                :title="t('{format} — click to preview', { format: derivative.format })"
                 data-testid="versions-derivative-chip"
                 @click="onChipClick(derivative.media_id)"
             >
@@ -186,7 +189,7 @@ async function convertTo(format: string): Promise<void> {
         <div class="flex items-center gap-2" data-testid="versions-convert-row">
             <Plus class="h-3.5 w-3.5 text-muted-foreground" />
             <label for="versions-convert-select" class="text-xs text-muted-foreground">
-                Convert to
+                {{ t('Convert to') }}
             </label>
             <select
                 id="versions-convert-select"
@@ -196,7 +199,7 @@ async function convertTo(format: string): Promise<void> {
                 @change="onConvertChange"
             >
                 <option value="">
-                    {{ loadingOptions ? 'Loading…' : 'Select a format' }}
+                    {{ loadingOptions ? t('Loading…') : t('Select a format') }}
                 </option>
                 <option
                     v-for="opt in optionList"
@@ -205,7 +208,7 @@ async function convertTo(format: string): Promise<void> {
                     :disabled="!opt.available"
                     data-testid="versions-convert-option"
                 >
-                    {{ opt.label }}{{ opt.available ? '' : ' (unavailable)' }}
+                    {{ opt.label }}{{ opt.available ? '' : ' ' + t('(unavailable)') }}
                 </option>
             </select>
             <span
@@ -213,7 +216,7 @@ async function convertTo(format: string): Promise<void> {
                 class="text-xs text-muted-foreground"
                 data-testid="versions-converting"
             >
-                Rendering {{ converting }}…
+                {{ t('Rendering {format}…', { format: converting }) }}
             </span>
         </div>
 

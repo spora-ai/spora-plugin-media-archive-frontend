@@ -12,17 +12,22 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "smoke": "node scripts/smoke.js",
-    "clean": "node scripts/clean.js"
+    "clean": "node scripts/clean.js",
+    "i18n:extract": "node scripts/i18n.mjs",
+    "i18n:check": "node scripts/i18n.mjs --check"
   },
   "dependencies": {
     "lucide-vue-next": "^0.487.0",
     "md-editor-v3": "^6.5.5",
     "pinia": "^2.3.0",
     "vue": "^3.5.0",
+    "vue-i18n": "^11.4.16",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@intlify/message-compiler": "^11.4.16",
+    "@typescript-eslint/typescript-estree": "^8.72.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "@vitest/coverage-v8": "^4.1.10",
     "@vue/test-utils": "^2.4.6",

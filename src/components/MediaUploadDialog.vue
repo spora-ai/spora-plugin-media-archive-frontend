@@ -27,6 +27,7 @@
  * Tavily-, or any plugin-specific code.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Upload, X } from 'lucide-vue-next'
 import type { MediaAsset, MediaPrincipal } from '../types'
 import type { PluginHostContext } from '../shims'
@@ -65,6 +66,8 @@ const emit = defineEmits<{
     (event: 'close'): void
 }>()
 
+const { t } = useI18n()
+
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const file = ref<File | null>(null)
 const principalId = ref<number | null>(null)
@@ -74,11 +77,19 @@ const uploading = ref(false)
 const error = ref<string | null>(null)
 const acceptAttr = ref('')
 
+/**
+ * The unit is part of the format, not copy: German writes the same `KB`,
+ * so the size is assembled here rather than in the template.
+ */
+const fileSizeLabel = computed(() =>
+    file.value === null ? '' : `${Math.round(file.value.size / 1024)} KB`,
+)
+
 function labelForPrincipal(p: MediaPrincipal): string {
     if (p.type === 'user') {
-        return 'My Media'
+        return t('My Media')
     }
-    return props.groupLabels[p.id] ?? `Group #${p.id}`
+    return props.groupLabels[p.id] ?? t('Group #{id}', { id: p.id })
 }
 
 /**
@@ -212,11 +223,11 @@ async function submit(): Promise<void> {
     } catch (e: unknown) {
         const apiErr = e as ApiErrorShape
         if (apiErr.code === 'FORBIDDEN_PRINCIPAL') {
-            error.value = 'You can only upload into a principal you belong to.'
+            error.value = t('You can only upload into a principal you belong to.')
         } else if (typeof apiErr.message === 'string' && apiErr.message !== '') {
             error.value = apiErr.message
         } else {
-            error.value = 'Upload failed.'
+            error.value = t('Upload failed.')
         }
     } finally {
         uploading.value = false
@@ -263,10 +274,9 @@ onBeforeUnmount(() => {
             <div
                 class="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-2xl"
             >
-                <h2 id="upload-title" class="text-base font-semibold">Upload media</h2>
+                <h2 id="upload-title" class="text-base font-semibold">{{ t('Upload media') }}</h2>
                 <p class="mt-1 text-xs text-muted-foreground">
-                    Attribute the upload to one of your principals so it appears in
-                    the right scope on the LIST endpoint.
+                    {{ t('Attribute the upload to one of your principals so it appears in the right scope on the LIST endpoint.') }}
                 </p>
 
                 <form class="mt-4 flex flex-col gap-3" data-testid="media-upload-form" @submit.prevent="submit">
@@ -277,7 +287,7 @@ onBeforeUnmount(() => {
                         @dragover="onDragOver"
                     >
                         <Upload class="h-5 w-5" />
-                        <span>Drag a file here, or pick one below</span>
+                        <span>{{ t('Drag a file here, or pick one below') }}</span>
                         <input
                             type="file"
                             class="block w-full text-xs text-foreground file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-primary-foreground"
@@ -290,7 +300,7 @@ onBeforeUnmount(() => {
                             class="truncate text-foreground"
                             data-testid="upload-filename"
                         >
-                            {{ file.name }} ({{ Math.round(file.size / 1024) }} KB)
+                            {{ file.name }} ({{ fileSizeLabel }})
                         </span>
                     </label>
 
@@ -312,7 +322,7 @@ onBeforeUnmount(() => {
                     </label>
 
                     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                        Prompt (optional)
+                        {{ t('Prompt (optional)') }}
                         <input
                             v-model="prompt"
                             type="text"
@@ -322,7 +332,7 @@ onBeforeUnmount(() => {
                     </label>
 
                     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                        Tags (comma-separated, optional)
+                        {{ t('Tags (comma-separated, optional)') }}
                         <input
                             v-model="tags"
                             type="text"
@@ -347,7 +357,7 @@ onBeforeUnmount(() => {
                             @click="close"
                         >
                             <X class="h-3.5 w-3.5" />
-                            Cancel
+                            {{ t('Cancel') }}
                         </button>
                         <button
                             type="submit"
@@ -356,7 +366,7 @@ onBeforeUnmount(() => {
                             data-testid="upload-submit"
                         >
                             <Upload class="h-3.5 w-3.5" />
-                            {{ uploading ? 'Uploading…' : 'Upload' }}
+                            {{ uploading ? t('Uploading…') : t('Upload') }}
                         </button>
                     </div>
                 </form>

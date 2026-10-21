@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
     ArrowLeft,
     Copy,
@@ -32,6 +33,8 @@ const emit = defineEmits<{
     (event: 'updated', asset: MediaAsset): void
     (event: 'deleted', id: string): void
 }>()
+
+const { t } = useI18n()
 
 /**
  * Mutations go through `hostContext.api` rather than raw `fetch()` so the
@@ -83,10 +86,10 @@ const previewSrc = computed<string | null>(() => {
 })
 
 const previewAlt = computed<string>(() => {
-    if (asset.value === null) return 'Archived'
-    const base = asset.value.prompt ?? asset.value.filename ?? 'Archived'
+    if (asset.value === null) return t('Archived')
+    const base = asset.value.prompt ?? asset.value.filename ?? t('Archived')
     return selectedDerivative.value !== null
-        ? `${base} (derivative)`
+        ? t('{name} (derivative)', { name: base })
         : base
 })
 
@@ -94,7 +97,7 @@ const previewAlt = computed<string>(() => {
 const previewSurfaceClass = 'flex h-[40vh] min-h-[220px] w-full lg:h-[70vh]'
 
 const previewUnavailableLabel = computed<string>(() => {
-    if (asset.value === null) return 'this file'
+    if (asset.value === null) return t('this file')
     return selectedDerivative.value !== null
         ? selectedDerivative.value.format
         : asset.value.media_type
@@ -312,8 +315,8 @@ const downloadName = computed<string>(() => {
 const downloadLabel = computed<string>(() => {
     const format = selectedDerivative.value?.format
     return format !== undefined && format !== ''
-        ? `Download ${format.toUpperCase()} derivative`
-        : 'Download'
+        ? t('Download {format} derivative', { format: format.toUpperCase() })
+        : t('Download')
 })
 
 const isShared = computed(() => asset.value !== null && Boolean(asset.value.public_url))
@@ -329,12 +332,12 @@ function showToast(message: string): void {
     }, 2500)
 }
 
-async function copyToClipboard(value: string, label: string): Promise<void> {
+async function copyToClipboard(value: string, successMessage: string): Promise<void> {
     try {
         await navigator.clipboard.writeText(value)
-        showToast(`${label} copied to clipboard`)
+        showToast(successMessage)
     } catch {
-        showToast('Clipboard access denied')
+        showToast(t('Clipboard access denied'))
     }
 }
 
@@ -438,7 +441,7 @@ async function toggleSharing(): Promise<void> {
         verb: 'patch',
         path: `/media/${asset.value.id}`,
         body: { public_access_enabled: willEnable },
-        successToast: willEnable ? 'Sharing enabled' : 'Sharing disabled',
+        successToast: willEnable ? t('Sharing enabled') : t('Sharing disabled'),
     })
     if (result?.updated) {
         emit('updated', result.updated)
@@ -452,11 +455,22 @@ async function refreshShareToken(): Promise<void> {
         verb: 'post',
         path: `/media/${asset.value.id}/public-token/refresh`,
         body: undefined,
-        successToast: 'Public URL rotated',
+        successToast: t('Public URL rotated'),
     })
     if (result?.updated) {
         emit('updated', result.updated)
     }
+}
+
+/**
+ * The toast for a saved field. One message per field rather than
+ * `"${field} updated"`, because the field name is part of the sentence
+ * and German puts it somewhere else.
+ */
+function fieldUpdatedToast(field: 'filename' | 'prompt' | 'tags'): string {
+    if (field === 'filename') return t('Filename updated')
+    if (field === 'prompt') return t('Prompt updated')
+    return t('Tags updated')
 }
 
 async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
@@ -465,7 +479,7 @@ async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
     if (field === 'filename') {
         const trimmed = editValue.value.trim()
         if (trimmed === '') {
-            errorMessage.value = 'Filename cannot be empty'
+            errorMessage.value = t('Filename cannot be empty')
             return
         }
         body = { filename: trimmed }
@@ -473,8 +487,8 @@ async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
         body = {
             tags: editValue.value
                 .split(',')
-                .map((t) => t.trim())
-                .filter((t) => t !== ''),
+                .map((tag) => tag.trim())
+                .filter((tag) => tag !== ''),
         }
     } else {
         body = { prompt: editValue.value }
@@ -484,7 +498,7 @@ async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
         verb: 'patch',
         path: `/media/${asset.value.id}`,
         body,
-        successToast: `${field} updated`,
+        successToast: fieldUpdatedToast(field),
     })
     if (result?.updated) {
         emit('updated', result.updated)
@@ -509,7 +523,7 @@ async function confirmDelete(): Promise<void> {
         field: 'delete',
         verb: 'delete',
         path: `/media/${asset.value.id}`,
-        successToast: 'Asset deleted',
+        successToast: t('Asset deleted'),
     })
     if (result !== null) {
         emit('deleted', asset.value.id)
@@ -536,7 +550,7 @@ async function keepAsset(): Promise<void> {
             verb: 'post',
             path: `/media/${asset.value.id}/keep`,
         })
-        showToast("File kept — won't be auto-purged.")
+        showToast(t('File kept — won\'t be auto-purged.'))
         await loadAsset()
     } catch (e) {
         errorMessage.value = e instanceof Error ? e.message : String(e)
@@ -627,11 +641,11 @@ onBeforeUnmount(() => {
                 @click="goBack"
             >
                 <ArrowLeft class="h-3.5 w-3.5" />
-                Back to Media Archive
+                {{ t('Back to Media Archive') }}
             </button>
-            <div v-if="loading" class="text-sm text-muted-foreground">Loading asset…</div>
+            <div v-if="loading" class="text-sm text-muted-foreground">{{ t('Loading asset…') }}</div>
             <div v-else-if="errorMessage" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                Failed to load asset: {{ errorMessage }}
+                {{ t('Failed to load asset: {error}', { error: errorMessage }) }}
             </div>
             <template v-else-if="asset">
                 <p class="text-xs uppercase tracking-wide text-muted-foreground">
@@ -641,21 +655,21 @@ onBeforeUnmount(() => {
                     v-if="editingField !== 'filename'"
                     type="button"
                     class="cursor-pointer truncate text-left text-xl font-semibold hover:bg-muted/40 rounded px-1 -mx-1"
-                    :title="asset.filename ?? 'Click to set filename'"
+                    :title="asset.filename ?? t('Click to set filename')"
                     data-testid="media-detail-filename"
                     @click="startEditing('filename', asset.filename)"
                     @keydown.enter.prevent="startEditing('filename', asset.filename)"
                     @keydown.space.prevent="startEditing('filename', asset.filename)"
                 >
-                    {{ asset.filename ?? 'Untitled' }}
-                    <span class="ml-2 text-xs font-normal text-muted-foreground">· click to rename</span>
+                    {{ asset.filename ?? t('Untitled') }}
+                    <span class="ml-2 text-xs font-normal text-muted-foreground">· {{ t('click to rename') }}</span>
                 </button>
                 <form
                     v-else
                     class="flex items-center gap-2"
                     @submit.prevent="saveField('filename')"
                 >
-                    <label for="media-filename-input" class="sr-only">Filename</label>
+                    <label for="media-filename-input" class="sr-only">{{ t('Filename') }}</label>
                     <input
                         id="media-filename-input"
                         ref="editingInput"
@@ -668,7 +682,7 @@ onBeforeUnmount(() => {
                         :disabled="savingField !== null"
                         class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
                     >
-                        Save
+                        {{ t('Save') }}
                     </button>
                     <button
                         type="button"
@@ -676,7 +690,7 @@ onBeforeUnmount(() => {
                         data-testid="filename-cancel"
                         @click="cancelEdit"
                     >
-                        Cancel
+                        {{ t('Cancel') }}
                     </button>
                 </form>
             </template>
@@ -710,7 +724,7 @@ onBeforeUnmount(() => {
                         type="button"
                         class="group relative items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-3"
                         :class="previewSurfaceClass"
-                        aria-label="Open image in lightbox"
+                        :aria-label="t('Open image in lightbox')"
                         data-testid="media-preview-figure"
                         @click="openLightbox"
                         @keydown.enter.prevent="openLightbox"
@@ -728,11 +742,11 @@ onBeforeUnmount(() => {
                             class="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground shadow-sm"
                             data-testid="media-preview-derivative-badge"
                         >
-                            Viewing derivative
+                            {{ t('Viewing derivative') }}
                         </div>
                         <div class="pointer-events-none absolute inset-0 flex items-end justify-end bg-gradient-to-t from-foreground/40 to-transparent p-3 opacity-0 transition-opacity group-hover:opacity-100">
                             <span class="inline-flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
-                                <Eye class="h-3.5 w-3.5" /> Click to zoom
+                                <Eye class="h-3.5 w-3.5" /> {{ t('Click to zoom') }}
                             </span>
                         </div>
                     </button>
@@ -751,7 +765,7 @@ onBeforeUnmount(() => {
                             data-testid="media-preview-pdf-download"
                         >
                             <Download class="h-4 w-4" />
-                            Download PDF
+                            {{ t('Download PDF') }}
                         </a>
                     </div>
                     <video
@@ -770,7 +784,7 @@ onBeforeUnmount(() => {
                             kind="captions"
                             src="data:text/vtt,WEBVTT%0A%0A"
                             srclang="en"
-                            label="No captions available"
+                            :label="t('No captions available')"
                             default
                         />
                     </video>
@@ -809,14 +823,14 @@ onBeforeUnmount(() => {
                             class="text-muted-foreground"
                             data-testid="media-preview-text-loading"
                         >
-                            Loading source…
+                            {{ t('Loading source…') }}
                         </p>
                         <p
                             v-else-if="textSourceError"
                             class="text-destructive"
                             data-testid="media-preview-text-error"
                         >
-                            Couldn't load source: {{ textSourceError }}
+                            {{ t("Couldn't load source: {error}", { error: textSourceError }) }}
                         </p>
                     </div>
                     <!-- Content-sized: a full-bleed box made an unrenderable file
@@ -828,11 +842,11 @@ onBeforeUnmount(() => {
                     >
                         <FileText class="h-8 w-8 text-muted-foreground" />
                         <p class="text-sm text-foreground">
-                            No inline preview for
+                            {{ t('No inline preview for') }}
                             <span class="font-medium">{{ previewUnavailableLabel }}</span>
                         </p>
                         <p class="max-w-xs text-xs text-muted-foreground">
-                            Download the file or open it in a new tab to view it.
+                            {{ t('Download the file or open it in a new tab to view it.') }}
                         </p>
                         <div class="mt-1 flex flex-wrap justify-center gap-2">
                             <a
@@ -842,7 +856,7 @@ onBeforeUnmount(() => {
                                 data-testid="media-preview-fallback-download"
                             >
                                 <Download class="h-3.5 w-3.5" />
-                                Download
+                                {{ t('Download') }}
                             </a>
                             <a
                                 :href="downloadSrc"
@@ -852,7 +866,7 @@ onBeforeUnmount(() => {
                                 data-testid="media-preview-fallback-open"
                             >
                                 <ExternalLink class="h-3.5 w-3.5" />
-                                Open in new tab
+                                {{ t('Open in new tab') }}
                             </a>
                         </div>
                     </div>
@@ -875,19 +889,19 @@ onBeforeUnmount(() => {
                             type="button"
                             class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                             data-testid="copy-uuid"
-                            @click="copyToClipboard(asset.id, 'UUID')"
+                            @click="copyToClipboard(asset.id, t('UUID copied to clipboard'))"
                         >
                             <Copy class="h-3.5 w-3.5" />
-                            Copy UUID
+                            {{ t('Copy UUID') }}
                         </button>
                         <button
                             type="button"
                             class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                             data-testid="copy-filename"
-                            @click="copyToClipboard(asset.filename ?? asset.id, 'Filename')"
+                            @click="copyToClipboard(asset.filename ?? asset.id, t('Filename copied to clipboard'))"
                         >
                             <Copy class="h-3.5 w-3.5" />
-                            Copy filename
+                            {{ t('Copy filename') }}
                         </button>
                     </div>
 
@@ -896,7 +910,7 @@ onBeforeUnmount(() => {
                         <div class="flex items-center justify-between">
                             <h3 class="flex items-center gap-1.5 text-sm font-semibold">
                                 <Share2 class="h-4 w-4" />
-                                Public sharing
+                                {{ t('Public sharing') }}
                             </h3>
                             <label class="inline-flex items-center gap-2 text-sm">
                                 <input
@@ -907,7 +921,7 @@ onBeforeUnmount(() => {
                                     @change="toggleSharing"
                                 />
                                 <output aria-live="polite" data-testid="sharing-status">
-                                    {{ isShared ? 'Enabled' : 'Disabled' }}
+                                    {{ isShared ? t('Enabled') : t('Disabled') }}
                                 </output>
                             </label>
                         </div>
@@ -925,9 +939,9 @@ onBeforeUnmount(() => {
                                     type="button"
                                     class="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
                                     data-testid="copy-public-url"
-                                    @click="copyToClipboard(asset.public_url ?? '', 'Public URL')"
+                                    @click="copyToClipboard(asset.public_url ?? '', t('Public URL copied to clipboard'))"
                                 >
-                                    <Copy class="h-3 w-3" /> Copy URL
+                                    <Copy class="h-3 w-3" /> {{ t('Copy URL') }}
                                 </button>
                                 <button
                                     type="button"
@@ -936,39 +950,43 @@ onBeforeUnmount(() => {
                                     data-testid="refresh-public-token"
                                     @click="refreshShareToken"
                                 >
-                                    <RefreshCw class="h-3 w-3" /> Refresh token
+                                    <RefreshCw class="h-3 w-3" /> {{ t('Refresh token') }}
                                 </button>
                             </div>
                         </template>
                         <p v-else class="mt-2 text-xs text-muted-foreground">
-                            When enabled, anyone with the URL can fetch the file (no auth required).
+                            {{ t('When enabled, anyone with the URL can fetch the file (no auth required).') }}
                         </p>
                     </section>
 
                     <!-- Metadata -->
                     <dl class="grid grid-cols-3 gap-2 text-xs">
-                        <dt class="text-muted-foreground">Created</dt>
+                        <dt class="text-muted-foreground">{{ t('Created') }}</dt>
                         <dd class="col-span-2 text-foreground">{{ createdAt }}</dd>
 
                         <dt class="text-muted-foreground">MIME</dt>
-                        <dd class="col-span-2 font-mono text-foreground">{{ asset.mime_type ?? 'unknown' }}</dd>
+                        <dd class="col-span-2 font-mono text-foreground">{{ asset.mime_type ?? t('unknown') }}</dd>
 
                         <template v-if="asset.width !== null && asset.height !== null">
-                            <dt class="text-muted-foreground">Dimensions</dt>
+                            <dt class="text-muted-foreground">{{ t('Dimensions') }}</dt>
                             <dd class="col-span-2 text-foreground">{{ asset.width }} × {{ asset.height }}</dd>
                         </template>
 
                         <template v-if="asset.duration_seconds !== null">
-                            <dt class="text-muted-foreground">Duration</dt>
-                            <dd class="col-span-2 text-foreground">{{ asset.duration_seconds?.toFixed(2) }}s</dd>
+                            <dt class="text-muted-foreground">{{ t('Duration') }}</dt>
+                            <dd class="col-span-2 text-foreground">
+                                {{ t('{duration}s', { duration: asset.duration_seconds?.toFixed(2) }) }}
+                            </dd>
                         </template>
 
                         <template v-if="asset.byte_size !== null">
-                            <dt class="text-muted-foreground">Size</dt>
-                            <dd class="col-span-2 text-foreground">{{ asset.byte_size }} bytes</dd>
+                            <dt class="text-muted-foreground">{{ t('Size') }}</dt>
+                            <dd class="col-span-2 text-foreground">
+                                {{ t('{size} bytes', { size: asset.byte_size }) }}
+                            </dd>
                         </template>
 
-                        <dt class="text-muted-foreground">Storage</dt>
+                        <dt class="text-muted-foreground">{{ t('Storage') }}</dt>
                         <dd class="col-span-2 text-foreground">{{ asset.storage_mode }}</dd>
 
                         <dt class="text-muted-foreground">Tags</dt>
@@ -976,12 +994,12 @@ onBeforeUnmount(() => {
                             <button
                                 type="button"
                                 class="cursor-pointer rounded px-1 -mx-1 text-left hover:bg-muted/40 w-full"
-                                :title="'Click to edit tags'"
+                                :title="t('Click to edit tags')"
                                 data-testid="tags-edit-button"
                                 @click="startEditing('tags', tagsString)"
                             >
                                 <span v-if="tagsString">{{ tagsString }}</span>
-                                <span v-else class="italic text-muted-foreground">click to add tags</span>
+                                <span v-else class="italic text-muted-foreground">{{ t('click to add tags') }}</span>
                             </button>
                         </dd>
                         <dd v-else class="col-span-2">
@@ -1000,7 +1018,7 @@ onBeforeUnmount(() => {
                                     class="rounded bg-primary px-2 text-xs text-primary-foreground disabled:opacity-50"
                                     data-testid="tags-save"
                                 >
-                                    Save
+                                    {{ t('Save') }}
                                 </button>
                                 <button
                                     type="button"
@@ -1008,18 +1026,18 @@ onBeforeUnmount(() => {
                                     data-testid="tags-cancel"
                                     @click="cancelEdit"
                                 >
-                                    Cancel
+                                    {{ t('Cancel') }}
                                 </button>
                             </form>
                         </dd>
 
                         <template v-if="asset.task_id">
-                            <dt class="text-muted-foreground">Task</dt>
+                            <dt class="text-muted-foreground">{{ t('Task') }}</dt>
                             <dd class="col-span-2 font-mono text-foreground">{{ asset.task_id }}</dd>
                         </template>
 
                         <template v-if="asset.source_url">
-                            <dt class="text-muted-foreground">Source</dt>
+                            <dt class="text-muted-foreground">{{ t('Source') }}</dt>
                             <dd class="col-span-2 break-all">
                                 <a
                                     v-if="safeExternalUrl(asset.source_url) !== null"
@@ -1031,7 +1049,7 @@ onBeforeUnmount(() => {
                                     {{ asset.source_url }}
                                     <ExternalLink class="h-3 w-3" />
                                 </a>
-                                <span v-else class="italic text-muted-foreground">Invalid source URL</span>
+                                <span v-else class="italic text-muted-foreground">{{ t('Invalid source URL') }}</span>
                             </dd>
                         </template>
                     </dl>
@@ -1048,7 +1066,7 @@ onBeforeUnmount(() => {
                             @keydown.enter.prevent="startEditing('prompt', asset.prompt)"
                             @keydown.space.prevent="startEditing('prompt', asset.prompt)"
                         >
-                            {{ asset.prompt ?? '(no prompt — click to add)' }}
+                            {{ asset.prompt ?? t('(no prompt — click to add)') }}
                         </button>
                         <form v-else class="flex flex-col gap-2" @submit.prevent="saveField('prompt')">
                             <label for="media-prompt-input" class="sr-only">Prompt</label>
@@ -1065,7 +1083,7 @@ onBeforeUnmount(() => {
                                     data-testid="prompt-cancel"
                                     @click="cancelEdit"
                                 >
-                                    Cancel
+                                    {{ t('Cancel') }}
                                 </button>
                                 <button
                                     type="submit"
@@ -1073,7 +1091,7 @@ onBeforeUnmount(() => {
                                     class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50"
                                     data-testid="prompt-save"
                                 >
-                                    Save
+                                    {{ t('Save') }}
                                 </button>
                             </div>
                         </form>
@@ -1089,7 +1107,7 @@ onBeforeUnmount(() => {
                             @click="keepAsset"
                         >
                             <Pin class="h-3.5 w-3.5" />
-                            Keep file
+                            {{ t('Keep file') }}
                         </button>
                     </section>
 
@@ -1102,7 +1120,7 @@ onBeforeUnmount(() => {
                             @click="openDeleteDialog"
                         >
                             <Trash2 class="h-3.5 w-3.5" />
-                            Delete asset
+                            {{ t('Delete asset') }}
                         </button>
                     </section>
 
@@ -1117,7 +1135,7 @@ onBeforeUnmount(() => {
             ref="lightboxRef"
             class="fixed inset-0 z-50 m-0 flex h-full w-full max-w-none items-center justify-center bg-foreground/80 p-4 backdrop:bg-foreground/80"
             aria-modal="true"
-            aria-label="Media preview"
+            :aria-label="t('Media preview')"
             data-testid="media-lightbox"
             @cancel.prevent="closeLightbox"
             @close="closeLightbox"
@@ -1127,7 +1145,7 @@ onBeforeUnmount(() => {
             <button
                 type="button"
                 class="absolute right-4 top-4 rounded-full bg-background/90 p-2 text-foreground shadow"
-                aria-label="Close lightbox"
+                :aria-label="t('Close lightbox')"
                 data-testid="lightbox-close"
                 @click="closeLightbox"
             >
@@ -1153,7 +1171,7 @@ onBeforeUnmount(() => {
                     kind="captions"
                     src="data:text/vtt,WEBVTT%0A%0A"
                     srclang="en"
-                    label="No captions available"
+                    :label="t('No captions available')"
                     default
                 />
             </video>
@@ -1169,9 +1187,9 @@ onBeforeUnmount(() => {
             data-testid="delete-confirm-dialog"
             @cancel.prevent="closeDeleteDialog"
         >
-            <h2 id="delete-title" class="text-base font-semibold">Delete asset?</h2>
+            <h2 id="delete-title" class="text-base font-semibold">{{ t('Delete asset?') }}</h2>
             <p id="delete-desc" class="mt-2 text-sm text-muted-foreground">
-                {{ asset.filename ?? 'This asset' }} will be permanently deleted. This cannot be undone.
+                {{ t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') }) }}
             </p>
             <div class="mt-4 flex justify-end gap-2">
                 <button
@@ -1180,7 +1198,7 @@ onBeforeUnmount(() => {
                     data-testid="delete-cancel"
                     @click="closeDeleteDialog"
                 >
-                    Cancel
+                    {{ t('Cancel') }}
                 </button>
                 <button
                     type="button"
@@ -1188,7 +1206,7 @@ onBeforeUnmount(() => {
                     data-testid="delete-confirm"
                     @click="confirmDelete"
                 >
-                    Delete
+                    {{ t('Delete') }}
                 </button>
             </div>
         </dialog>

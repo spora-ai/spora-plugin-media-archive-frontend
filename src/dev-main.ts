@@ -19,15 +19,20 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import type { PluginHostContext } from './shims'
 import { createMockApi } from './dev-mock'
+import { createPluginI18n } from './i18n'
 
 // One-line banner so the developer knows they're in sandbox mode and
 // doesn't waste time wondering why their real backend isn't responding.
 console.info('[spora/media-archive] dev sandbox — using in-memory fixtures (no backend)')
 
+// `?locale=de` renders the panel in German without touching the code.
+const locale = new URLSearchParams(location.search).get('locale') ?? 'en'
+
 const hostContext: PluginHostContext = {
     api: createMockApi(),
     pinia: createPinia(),
     theme: 'light',
+    locale,
     route: { path: '/apps/media-archive', params: {}, query: {} },
     router: {
         push: async () => undefined,
@@ -39,6 +44,7 @@ const target = document.getElementById('app')
 if (target) {
     const app = createApp(App, { hostContext })
     app.use(createPinia())
+    app.use(createPluginI18n(locale))
     app.config.globalProperties.$host = hostContext
     app.mount(target)
 }
