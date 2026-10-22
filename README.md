@@ -1,6 +1,6 @@
 # spora-plugin-media-archive-frontend
 
-Pre-built Vue SPA for the Spora **Media Archive** admin panel. Delivered as a Composer package of type `spora-plugin-frontend`; `spora-installer`'s `SporaPluginFrontendInstaller` copies this repo's `frontend/` directory into `public/plugins/spora-plugin-media-archive-frontend/` so the host SPA can lazy-load it via `/plugins/spora-plugin-media-archive-frontend/main.js`.
+Pre-built Vue SPA for the Spora **Media Archive** admin panel. Delivered as a Composer package of type `spora-plugin-frontend`; `spora-installer`'s `SporaPluginFrontendInstaller` copies this repo's `frontend/` directory into `public/plugins/media-archive/` so the host SPA can lazy-load it via `/plugins/media-archive/main.js`. The directory name comes from this package's `composer.json#extra.spora-plugin-slug` (`media-archive`), which must equal the parent plugin's `plugin.json#slug` — there is no fallback to the package name.
 
 ## Why a separate repo from the PHP plugin?
 
@@ -53,7 +53,7 @@ The build output (`main.js` + `style.css`) is committed to this repo. Operators 
 npm run dev   # vite dev server on :5174
 ```
 
-The host SPA's `vite.config.ts` proxies `/plugins/spora-plugin-media-archive-frontend` to `:5174` so editing `src/*` updates the panel without rebuilding the host. See `docs.spora-ai.com/develop/plugins/authoring-frontend` for the dev workflow.
+The host SPA proxies `/plugins/media-archive` to `:5174` so editing `src/*` updates the panel without rebuilding the host. The proxy is not hard-coded: start the host with `SPORA_PLUGIN_DEV_PORTS=media-archive:5174 npm run dev` and it installs one per listed slug. See `https://docs.spora-ai.com/develop/plugins/local-development.html` for the dev workflow.
 
 The dev sandbox reads `?locale=de` from the query string, so the panel can be rendered in German without a backend.
 
