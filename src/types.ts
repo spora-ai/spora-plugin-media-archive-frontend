@@ -3,8 +3,7 @@
  *
  * Fields documented here are the ones the UI actually renders. The PHP
  * model carries a few additional columns (`tags`, `metadata`, etc.) that
- * the v1 panel exposes only in the detail drawer — see
- * `MediaDetailDrawer.vue`.
+ * the panel exposes only on the detail page.
  */
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'unknown'
 
@@ -104,9 +103,9 @@ export interface MediaPrincipal {
 
 /**
  * Wire shape for a row returned by `GET /api/v1/groups`. The plugin
- * only needs the `id` and `name` to render a chip label; other fields
- * exist so the host's `GroupDetailResource` shape doesn't surprise a
- * future consumer.
+ * needs the `principal_id` and `name` to render a chip label; the other
+ * fields exist so the host's `GroupDetailResource` shape doesn't
+ * surprise a future consumer.
  */
 export interface MediaGroup {
     id: number
@@ -116,14 +115,10 @@ export interface MediaGroup {
 
 /**
  * The host's `spora-frontend/src/api/client.ts` unwraps the standard
- * `{ data: T }` envelope — the plugin receives `T` directly, not
- * `{ data: T }`. The actual list payload (see
+ * `{ data: T }` envelope — the plugin receives `T` directly. The actual
+ * list payload (see
  * `spora-core/app/Http/MediaArchiveController::index()`) is:
  *   `{ assets, page, perPage, total, lastPage }`.
- *
- * The earlier `MediaListEnvelope` was a guess at the wire shape that
- * didn't match the unwrap. The client now expects the flat shape
- * with camelCase pagination fields.
  */
 export interface MediaListResponse {
     assets: MediaAsset[]
@@ -156,7 +151,7 @@ export interface MediaListQuery {
     /**
      * Repeated `?principal_id=` filter. The Media Archive plugin
      * never sets this directly — it derives the value from
-     * `selectedPrincipalId` in `App.vue` and lets the build of
+     * `selectedScope` in `App.vue` and lets the build of
      * `URLSearchParams` translate the single-pick state into the
      * repeated-key wire shape the controller intersects.
      */

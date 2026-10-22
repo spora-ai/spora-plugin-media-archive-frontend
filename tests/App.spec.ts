@@ -54,10 +54,11 @@ const emptyList: MediaListResponse = {
 
 /**
  * Default principals + groups fixtures the App.vue's bootstrapScope()
- * call resolves with. The plugin only reads `id` and `name`; the rest
- * is here to mirror the wire shape from `GET /principals/me` and
- * `GET /groups` so a future consumer that grows the panel doesn't
- * have to rewire every test.
+ * call resolves with. The plugin reads `id` and `type` off a principal
+ * and `principal_id` + `name` off a group; the rest is here to mirror
+ * the wire shape from `GET /principals/me` and `GET /groups` so a
+ * future consumer that grows the panel doesn't have to rewire every
+ * test.
  */
 const defaultPrincipals: MediaPrincipal[] = [
     { id: 101, type: 'user', user_id: 1, group_id: null },
@@ -172,9 +173,7 @@ describe('App.vue', () => {
         expect(wrapper.find('#spora-plugin-media-archive').exists()).toBe(true)
         expect(wrapper.text()).toContain('Media Archive')
         expect(wrapper.text()).toContain('2 assets')
-        // Three API calls: /principals/me, /groups, /media.
         expect(get).toHaveBeenCalledTimes(1)
-        // The plugin calls /media?page=1&per_page=24 — no filters.
         expect(get.mock.calls[0]?.[0]).toContain('/media?')
     })
 
@@ -216,7 +215,7 @@ describe('App.vue', () => {
         // container div, not a chip, and would otherwise inflate the count.
         const chips = wrapper.findAll('[data-testid^="media-scope-"]:not([data-testid="media-scope-chips"])')
         // Default fixtures: ALL, My Media (user principal 101), Group A
-        // (group principal 202 = "Marketing Team") = 3 chips.
+        // (group principal 202 = "Marketing Team").
         expect(chips).toHaveLength(3)
         expect(wrapper.find('[data-testid="media-scope-all"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-scope-101"]').exists()).toBe(true)
@@ -587,11 +586,9 @@ describe('App.vue', () => {
         await flushPromises()
         await flushPromises()
 
-        // Page 1 loaded → button visible, total = 48, currentPage < lastPage.
         expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-load-more-meta"]').text()).toContain('Showing 1 of 48')
 
-        // Click Load more → page 2 loaded, appended.
         await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
         await flushPromises()
         await flushPromises()
@@ -608,8 +605,8 @@ describe('App.vue', () => {
         expect(cardTestIds).toContain('media-card-test-2')
         expect(get.mock.calls.at(-1)?.[0]).toContain('page=2')
 
-        // No more pages → button is gone (and so is the meta line that
-        // rides under it; both render together as a `v-if` group).
+        // The button and the meta line under it render together as one
+        // `v-if` group.
         expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(false)
         expect(wrapper.find('[data-testid="media-load-more-meta"]').exists()).toBe(false)
     })
@@ -660,7 +657,6 @@ describe('App.vue', () => {
         const cardTestIds = wrapper.findAll('[data-testid^="media-card-"]')
             .map((c) => c.attributes('data-testid') ?? '')
             .filter((id) => /^media-card-[a-z0-9-]+$/.test(id) && id !== 'media-card-filename')
-        // `shared-id` must appear exactly once even though both pages returned it.
         expect(cardTestIds).toHaveLength(3)
         expect(cardTestIds.filter((id) => id === 'media-card-shared-id')).toHaveLength(1)
     })
@@ -687,9 +683,6 @@ describe('App.vue', () => {
         await flushPromises()
         await flushPromises()
         expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(true)
-        // Change filter — the next /media call must be page=1 (the
-        // setters reset it explicitly) and the Load more button must
-        // disappear because lastPage drops back to 1.
         await wrapper.find('[data-testid="media-type-image"]').trigger('click')
         await flushPromises()
         await flushPromises()
@@ -737,7 +730,6 @@ describe('App.vue', () => {
         expect(inlineError.text()).toContain('network down')
         expect(wrapper.text()).not.toContain('Failed to load media')
 
-        // Retry: clicking the button again kicks off a fresh append.
         await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
         await flushPromises()
         await flushPromises()
@@ -781,7 +773,6 @@ describe('App.vue', () => {
         await flushPromises()
         await flushPromises()
 
-        // Kick off the append. loadingMore=true, button shows "Loading…".
         await wrapper.find('[data-testid="media-load-more-button"]').trigger('click')
         await flushPromises()
         const midButton = wrapper.find('[data-testid="media-load-more-button"]')
@@ -817,9 +808,6 @@ describe('App.vue', () => {
     })
 
     it('sends include_temporary=false on the initial list call (toggle default off)', async () => {
-        // The query param is always emitted so the controller's
-        // default is overridden deterministically — operators who
-        // never open the toggle still see the non-temp rows.
         const get = vi.fn().mockResolvedValueOnce(emptyList)
         const helper = buildContext(get); mount(App, { props: { hostContext: helper } })
         await flushPromises()

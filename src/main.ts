@@ -13,8 +13,8 @@ import { createPluginI18n } from './i18n'
  *
  * Important: the plugin uses a *local* Pinia instance. Plugin-only state
  * (filters, selection) lives here so it doesn't pollute the host's stores.
- * Host services (auth, theme) are reached via the passed-in `hostContext.pinia`
- * — see `useHostAuthStore` etc.
+ * Host services (auth, theme) are reached via the passed-in
+ * `hostContext.pinia`.
  *
  * `mount()` may be sync or async. The registry awaits the return value when
  * it looks like a thenable, so plugins can do async setup (config fetch,
@@ -35,7 +35,7 @@ const SporaApp = {
         app.config.globalProperties.$host = hostContext
         app.mount(target)
         // Keep a back-reference so `unmount` can find the right app even if
-        // the host mounts the same bundle into multiple slots in the future.
+        // the host mounts the same bundle into multiple slots.
         ;(target as HTMLElement & { __sporaApp?: { unmount: () => void } }).__sporaApp = {
             unmount: () => {
                 app.unmount()

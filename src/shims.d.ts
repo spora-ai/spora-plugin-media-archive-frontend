@@ -26,11 +26,10 @@ export interface PluginHostContext {
     /**
      * The host's `spora-frontend/src/api/client.ts → request<T>()` unwraps
      * the standard `{ data: T }` envelope before handing the value to the
-     * caller (see line 117: `body.data ?? body`). Plugins receive `T`
-     * directly — for the Media Archive list endpoint that's the flat
+     * caller (`body.data ?? body`). Plugins receive `T` directly — for the
+     * Media Archive list endpoint that's the flat
      * `{ assets, page, perPage, total, lastPage }` shape, not a further
-     * envelope. The earlier `{ data: T }` shim was a guess at the wire
-     * shape that didn't match the host's unwrap.
+     * envelope.
      */
     api: {
         get: <T = unknown>(path: string) => Promise<T>

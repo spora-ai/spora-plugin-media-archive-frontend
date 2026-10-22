@@ -9,14 +9,6 @@ const props = withDefaults(defineProps<{ assets?: MediaAsset[] | null }>(), {
 
 const { t } = useI18n()
 
-/**
- * The grid forwards a card click to the parent's `select` event so the
- * caller (App.vue) can decide whether to navigate to the detail page
- * or, in the future, open a quick-view modal. The `upload-click`
- * trigger mirrors the same pattern: the empty-state CTA lives next to
- * the grid's copy so the affordance is colocated, but the parent owns
- * the dialog so it can stay focused on the page-level state.
- */
 const emit = defineEmits<{
     (event: 'select', asset: MediaAsset): void
     (event: 'upload-click'): void

@@ -120,7 +120,6 @@ describe('VersionsStrip', () => {
         const harness = buildHost({ options: [] })
         const wrapper = mountStrip(asset, harness)
         await flushPromises()
-        // Source + 2 derivative chips.
         expect(wrapper.find('[data-testid="versions-source"]').exists()).toBe(true)
         const chips = wrapper.findAll('[data-testid="versions-derivative-chip"]')
         expect(chips).toHaveLength(2)
@@ -208,7 +207,6 @@ describe('VersionsStrip', () => {
         expect(options[0]?.text()).toBe('PDF')
         expect(options[1]?.text()).toBe('PNG')
         expect(options[2]?.text()).toBe('SVG')
-        // All are available → none are disabled.
         const disabledCount = options.filter((o) => o.attributes('disabled') !== undefined).length
         expect(disabledCount).toBe(0)
         wrapper.unmount()

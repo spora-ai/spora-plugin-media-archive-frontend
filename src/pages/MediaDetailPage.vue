@@ -63,8 +63,7 @@ const selectedDerivativeId = ref<string>('source')
 
 /**
  * Selected derivative for the current selection, or `null` when the
- * source is being shown. Computed separately from the parent asset so
- * the preview pane can branch on whether a derivative is active.
+ * source is being shown.
  */
 const selectedDerivative = computed<MediaDerivative | null>(() => {
     if (asset.value === null) return null
@@ -75,8 +74,8 @@ const selectedDerivative = computed<MediaDerivative | null>(() => {
 
 /**
  * What the `<img :src>` and the lightbox render. Source by default,
- * derivative URL when a chip is active. Returns `null` while the asset
- * is still loading so the template can short-circuit the <img>.
+ * derivative URL when a chip is active; `null` while the asset is
+ * still loading.
  */
 const previewSrc = computed<string | null>(() => {
     if (asset.value === null) return null
@@ -108,8 +107,7 @@ type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'
 /**
  * What element the selection needs: the SELECTED derivative's format + mime_type
  * when one is active, else the source asset's media_type + mime_type. Keying on the
- * asset alone left a PDF derivative on a `.typ` source unrenderable — pinned by the
- * "renders a PDF derivative in a download card" test.
+ * asset alone left a PDF derivative on a `.typ` source unrenderable.
  */
 const previewKind = computed<PreviewKind>(() => {
     if (asset.value === null) return 'unsupported'
@@ -120,14 +118,6 @@ const previewKind = computed<PreviewKind>(() => {
     return kindForMediaType(asset.value.media_type, asset.value.mime_type)
 })
 
-/**
- * Image-like derivative formats the browser can decode inline. The
- * concrete raster extension list is small; the core resize/convert
- * presets ship as `thumbnail-*`, `medium-*`, `format-*` (see
- * `ImageDerivativeFormat::FORMAT_PRESETS`) and all of those output
- * raster bytes, so we accept any `format-*|thumbnail-*|medium-*`
- * prefix as image too.
- */
 const PDF_FORMATS = new Set(['pdf'])
 
 const MARKDOWN_MIME_TYPES = new Set(['text/markdown', 'text/x-markdown'])
@@ -142,6 +132,13 @@ function isMarkdown(format: string, mimeType: string | null): boolean {
     return MARKDOWN_FORMATS.has(format.toLowerCase())
 }
 
+/**
+ * Image-like derivative formats the browser can decode inline. The
+ * core resize/convert presets ship as `thumbnail-*`, `medium-*`,
+ * `format-*` (see `ImageDerivativeFormat::FORMAT_PRESETS`) and all of
+ * those output raster bytes, so we accept any of those prefixes as
+ * image too.
+ */
 function kindForFormat(format: string, mimeType: string | null): PreviewKind {
     const f = format.toLowerCase()
     if (PDF_FORMATS.has(f)) return 'pdf'
@@ -199,7 +196,7 @@ const selectedTextUrl = computed<string | null>(() => {
         : asset.value.asset_url
 })
 
-// Monotonic, bumped on every load: an in-flight load of a different selection must never write its body. Pinned by the "discards a stale text-source fetch" test.
+// Monotonic, bumped on every load: an in-flight load of a different selection must never write its body.
 let loadToken = 0
 
 async function loadTextSource(): Promise<void> {
@@ -230,7 +227,7 @@ async function loadTextSource(): Promise<void> {
 // The `${assetId}|${url}` the pane last settled on, or `null` before the first run — not the watcher's `oldValue`, which an `immediate` watch fills with `INITIAL_WATCHER_VALUE`, not `undefined`.
 let loadedTextTarget: string | null = null
 
-// One watcher, not two: split, the fetch fires while `asset.value` still holds the previous asset and the `textSource === null` guard below then refuses the refetch. Pinned by the "switches from one text derivative to another" test.
+// One watcher, not two: split, the fetch fires while `asset.value` still holds the previous asset and the `textSource === null` guard below then refuses the refetch.
 watch(
     () => [props.assetId, selectedTextUrl.value, previewKind.value] as const,
     ([assetId, url, kind]) => {
@@ -311,7 +308,6 @@ const downloadName = computed<string>(() => {
     return `${stem}.${derivative.format !== '' ? derivative.format : 'bin'}`
 })
 
-// Names the selection so the operator can tell what Download will serve.
 const downloadLabel = computed<string>(() => {
     const format = selectedDerivative.value?.format
     return format !== undefined && format !== ''
@@ -601,6 +597,11 @@ function extractFormat(derivative: MediaAsset): string {
     return slash >= 0 ? mime.slice(slash + 1).toLowerCase() : ''
 }
 
+/**
+ * Only http(s) is allowed through: the URL comes from the server and is
+ * rendered as a link, so a `javascript:` or `data:` scheme would run in
+ * the operator's session.
+ */
 function safeExternalUrl(url: string | null | undefined): string | null {
     if (url === null || url === undefined) return null
     const trimmed = url.trim()

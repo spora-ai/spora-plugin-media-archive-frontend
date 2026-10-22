@@ -1,10 +1,8 @@
 /**
  * useMediaDerivatives — thin wrapper over the two core derivative
- * endpoints that the Media Archive plugin's `VersionsStrip.vue` (and
- * any future derivative-aware UI) consumes. Keeping the wrapper
- * centralised avoids forking the URL format between callers and makes
- * the producer-discovery protocol easy to swap should the backend
- * shape evolve (e.g. `?format=` filters or streaming responses).
+ * endpoints. Keeping the wrapper centralised avoids forking the URL
+ * format between callers and makes the producer-discovery protocol
+ * easy to swap should the backend shape evolve.
  *
  * Endpoints (owned by `MediaDerivativeController` /
  * `MediaDerivativeOptionsController` in spora-core, generic —

@@ -32,10 +32,8 @@ describe('MediaFilters.vue scope chip row', () => {
         expect(wrapper.find('[data-testid="media-scope-all"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-scope-101"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-scope-202"]').exists()).toBe(true)
-        // User-principal labels as "My Media" — the bug we fixed.
         expect(wrapper.find('[data-testid="media-scope-101"]').text()).toContain('My Media')
         expect(wrapper.find('[data-testid="media-scope-101"]').text()).not.toContain('Group #101')
-        // Group-principal gets the friendly group name.
         expect(wrapper.find('[data-testid="media-scope-202"]').text()).toContain('Marketing Team')
     })
 
@@ -147,7 +145,6 @@ describe('MediaFilters.vue "Include temporary files" toggle', () => {
         const toggleEl = wrapper.find<HTMLInputElement>('[data-testid="media-show-temporary"]')
         expect(toggleEl.exists()).toBe(true)
         expect(toggleEl.element.checked).toBe(false)
-        // Shared singleton confirms the default.
         const { showTemporary } = useShowTemporaryToggle()
         expect(showTemporary.value).toBe(false)
     })

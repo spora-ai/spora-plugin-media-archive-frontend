@@ -236,7 +236,6 @@ describe('MediaUploadDialog', () => {
     it('uses defaultPrincipalId when provided and valid', async () => {
         const harness = buildHost()
         const wrapper = mount(MediaUploadDialog, {
-            // Pass a group-principal id — must override the user-principal fallback.
             props: dialogProps(harness, 202),
             attachTo: document.body,
         })

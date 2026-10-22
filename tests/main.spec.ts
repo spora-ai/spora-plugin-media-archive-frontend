@@ -93,7 +93,6 @@ describe('MediaFilters', () => {
             },
         })
         const audio = wrapper.find('[data-testid="media-type-audio"]')
-        // The active pill has the `bg-primary` class; the inactive ones don't.
         expect(audio.classes()).toContain('bg-primary')
     })
 })
