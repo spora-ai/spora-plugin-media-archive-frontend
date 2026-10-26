@@ -13,6 +13,17 @@
  * `en.json` is a generated identity map (`"Save": "Save"`), so the fallback
  * chain costs nothing and an unmigrated key renders as the English source
  * rather than as a raw key.
+ *
+ * **There is no module-scope `t()` here, and that is deliberate.** The other
+ * four plugin frontends export one because they have stores or plain modules
+ * that translate; this panel has neither — every operator-facing string is
+ * rendered inside a component, which reaches the catalogue through `useI18n()`.
+ * An export nobody calls is an API the next reader has to maintain.
+ *
+ * `npm run i18n:check` fails on operator-facing copy outside `t()` in a `.ts`
+ * module too, so the first plain module that needs to translate breaks the
+ * build instead of shipping English. Add the helper then, recording the
+ * composer in `createPluginI18n` the way the four sibling frontends do.
  */
 import { createI18n } from 'vue-i18n'
 
