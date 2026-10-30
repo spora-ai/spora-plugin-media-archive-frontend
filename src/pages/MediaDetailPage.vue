@@ -1071,7 +1071,9 @@ onBeforeUnmount(() => {
 
                         <dt class="text-muted-foreground">{{ t('Kind') }}</dt>
                         <dd class="col-span-2">
+                            <label for="media-detail-kind" class="sr-only">{{ t('Kind') }}</label>
                             <select
+                                id="media-detail-kind"
                                 v-model="kindSelection"
                                 :disabled="savingField !== null"
                                 class="rounded border border-border bg-background px-2 py-1 text-foreground disabled:opacity-50"
