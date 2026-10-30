@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MediaFilters from '../src/components/MediaFilters.vue'
-import type { MediaAssetKind, MediaFolder, MediaPrincipal } from '../src/types'
+import type { MediaAssetKind, MediaPrincipal, ScopedMediaFolder } from '../src/types'
 import { __resetShowTemporaryToggleForTesting, useShowTemporaryToggle } from '../src/composables/useShowTemporaryToggle'
 
 /**
@@ -123,10 +123,10 @@ describe('MediaFilters.vue scope chip row', () => {
 })
 
 describe('MediaFilters.vue folder tree', () => {
-    const folders: MediaFolder[] = [
-        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 12 },
-        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 3 },
-        { id: 'folder-3', name: 'Brand', path: '/Brand', parent_id: null, asset_count: 0 },
+    const folders: ScopedMediaFolder[] = [
+        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 12, principal_id: 101 },
+        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 3, principal_id: 101 },
+        { id: 'folder-3', name: 'Brand', path: '/Brand', parent_id: null, asset_count: 0, principal_id: 101 },
     ]
 
     function mountFilters(overrides: Record<string, unknown> = {}) {
@@ -193,6 +193,75 @@ describe('MediaFilters.vue folder tree', () => {
         const wrapper = mountFilters({ folders: [] })
         expect(wrapper.find('[data-testid="media-folder-empty"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-folder-folder-1"]').exists()).toBe(false)
+    })
+
+    it('names the principal of a folder when the scope spans several principals', () => {
+        // A folder's `path` is unique per principal, not globally, so two
+        // principals may own a folder with the same name. Without the
+        // principal on the row the tree shows two identically labelled
+        // buttons and the operator cannot tell which one filters what.
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [userPrincipal, marketingPrincipal],
+                selectedScope: null,
+                groupLabels: { 202: 'Marketing Team' },
+                folders: [
+                    { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2, principal_id: 101 },
+                    { id: 'folder-2', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 4, principal_id: 202 },
+                ],
+                selectedFolderId: null,
+                kind: '',
+            },
+        })
+        const own = wrapper.find('[data-testid="media-folder-folder-1"] [data-testid="media-folder-principal"]')
+        const other = wrapper.find('[data-testid="media-folder-folder-2"] [data-testid="media-folder-principal"]')
+        expect(own.text()).toContain('My Media')
+        expect(other.text()).toContain('Marketing Team')
+    })
+
+    it('does not name the principal when a single principal is in scope', () => {
+        // One principal's folders only — the label would be noise.
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [userPrincipal, marketingPrincipal],
+                selectedScope: 202,
+                groupLabels: { 202: 'Marketing Team' },
+                folders: [
+                    { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2, principal_id: 101 },
+                    { id: 'folder-2', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 4, principal_id: 202 },
+                ],
+                selectedFolderId: null,
+                kind: '',
+            },
+        })
+        expect(wrapper.find('[data-testid="media-folder-principal"]').exists()).toBe(false)
+    })
+})
+
+describe('MediaFilters.vue on a core without the folders release', () => {
+    it('offers neither the kind filter nor the folder tree', () => {
+        // A core that predates the release ignores `?kind=` and has no
+        // folders, so the panel must not offer the filter at all.
+        const wrapper = mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [userPrincipal],
+                selectedScope: null,
+                groupLabels: {},
+                folders: [],
+                selectedFolderId: null,
+                kind: '',
+                foldersSupported: false,
+            },
+        })
+        expect(wrapper.find('[data-testid="media-kind-pills"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-folder-tree"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-folder-empty"]').exists()).toBe(false)
     })
 })
 

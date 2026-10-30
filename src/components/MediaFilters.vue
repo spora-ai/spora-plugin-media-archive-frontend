@@ -20,6 +20,10 @@
  * the chosen folder (or `null` for the tree's root) and `update:kind`
  * with the chosen mark, and never touches the API client. The parent
  * owns the `load()` call.
+ *
+ * The folder tree and the mark row are only offered when the parent
+ * says the core has the folders release — see the `foldersSupported`
+ * prop.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -38,7 +42,7 @@ import {
     LayoutTemplate,
     Lightbulb,
 } from 'lucide-vue-next'
-import type { MediaAssetKind, MediaFolder, MediaPrincipal, MediaType } from '../types'
+import type { MediaAssetKind, MediaPrincipal, MediaType, ScopedMediaFolder } from '../types'
 import { buildFolderTree, flattenFolderTree } from '../lib/folder-tree'
 import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 
@@ -80,7 +84,7 @@ const props = withDefaults(defineProps<{
      * The folders of the principals in scope, flat and ordered by path.
      * The tree is rebuilt from `parent_id` — see `lib/folder-tree.ts`.
      */
-    folders?: MediaFolder[]
+    folders?: ScopedMediaFolder[]
     /**
      * The selected folder id, or `null` for the tree's root (the whole
      * library).
@@ -90,11 +94,22 @@ const props = withDefaults(defineProps<{
      * The selected mark, or `''` for every mark.
      */
     kind?: MediaAssetKind | ''
+    /**
+     * Whether the core carries the folders release.
+     *
+     * The folders endpoint, the `folder_id` column and the `kind` mark
+     * ship together, so a core that predates them ignores `?kind=` — and
+     * a filter the server ignores is worse than no filter. The parent
+     * probes the folders endpoint and passes the answer here; the panel
+     * then offers neither the tree nor the mark.
+     */
+    foldersSupported?: boolean
 }>(), {
     myMediaLabel: null,
     folders: () => [],
     selectedFolderId: null,
     kind: '',
+    foldersSupported: true,
 })
 
 const emit = defineEmits<{
@@ -148,6 +163,22 @@ const kindChips: KindChip[] = [
 const selected = computed(() => props.type)
 
 /**
+ * The label of a principal: "My Media" for the user-principal, the
+ * group's name for a group-principal.
+ *
+ * The scope chips and the folder rows share it, so a folder row names
+ * the same principal the chip above it does.
+ */
+function principalLabel(principal: MediaPrincipal): string {
+    if (principal.type === 'user') {
+        return props.myMediaLabel
+            ? t('My Media ({name})', { name: props.myMediaLabel })
+            : t('My Media')
+    }
+    return props.groupLabels[principal.id] ?? t('Group #{id}', { id: principal.id })
+}
+
+/**
  * ALL chip + one chip per principal. The user-principal is rendered
  * with the `My Media` label (no fallback) regardless of whether
  * `groupLabels` has an entry — using `groupLabels[id]` for every
@@ -156,21 +187,10 @@ const selected = computed(() => props.type)
 const scopeChips = computed<ReadonlyArray<ScopeChip>>(() => {
     const out: ScopeChip[] = [{ id: null, label: t('All'), icon: LayoutGrid }]
     for (const principal of props.principals) {
-        if (principal.type === 'user') {
-            out.push({
-                id: principal.id,
-                label: props.myMediaLabel
-                    ? t('My Media ({name})', { name: props.myMediaLabel })
-                    : t('My Media'),
-                icon: User,
-            })
-            continue
-        }
-        const label = props.groupLabels[principal.id] ?? t('Group #{id}', { id: principal.id })
         out.push({
             id: principal.id,
-            label,
-            icon: Users,
+            label: principalLabel(principal),
+            icon: principal.type === 'user' ? User : Users,
         })
     }
     return out
@@ -181,6 +201,30 @@ const scopeChips = computed<ReadonlyArray<ScopeChip>>(() => {
  * the markup can indent it without recursing.
  */
 const folderRows = computed(() => flattenFolderTree(buildFolderTree(props.folders)))
+
+/**
+ * Whether the folder rows have to name their principal.
+ *
+ * A folder's `path` is unique per principal and not globally, so in the
+ * ALL scope two principals may own a folder with the same name — and the
+ * tree would show two identically labelled rows. A scope of one
+ * principal holds that principal's folders only, so the label would be
+ * noise there.
+ */
+const showFolderPrincipal = computed(() =>
+    props.selectedScope === null
+    && new Set(props.folders.map((folder) => folder.principal_id)).size > 1,
+)
+
+/**
+ * The label of the principal that owns a folder.
+ */
+function folderPrincipalLabel(folder: ScopedMediaFolder): string {
+    const principal = props.principals.find((candidate) => candidate.id === folder.principal_id)
+    return principal === undefined
+        ? t('Group #{id}', { id: folder.principal_id })
+        : principalLabel(principal)
+}
 
 function isScopeActive(id: Scope): boolean {
     return props.selectedScope === id
@@ -243,7 +287,7 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
             </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <div v-if="foldersSupported" class="flex flex-wrap items-center gap-2">
             <div class="flex flex-wrap gap-2" data-testid="media-kind-pills">
                 <button
                     v-for="chip in kindChips"
@@ -290,7 +334,7 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
             </button>
         </div>
 
-        <div class="flex flex-col gap-1" data-testid="media-folder-tree">
+        <div v-if="foldersSupported" class="flex flex-col gap-1" data-testid="media-folder-tree">
             <button
                 type="button"
                 class="inline-flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
@@ -325,6 +369,13 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
             >
                 <Folder class="h-3.5 w-3.5" />
                 <span class="truncate">{{ row.folder.name }}</span>
+                <span
+                    v-if="showFolderPrincipal"
+                    class="opacity-70"
+                    data-testid="media-folder-principal"
+                >
+                    {{ folderPrincipalLabel(row.folder) }}
+                </span>
                 <span class="opacity-70">{{ row.folder.asset_count }}</span>
             </button>
 

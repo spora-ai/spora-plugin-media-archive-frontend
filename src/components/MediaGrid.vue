@@ -7,7 +7,7 @@ import type { MediaAsset, MediaFolder } from '../types'
 const props = withDefaults(defineProps<{
     assets?: MediaAsset[] | null
     /**
-     * The folders of the principals in scope. The asset carries only a
+     * The folders of every visible principal. The asset carries only a
      * `folder_id`, so the name on the card comes from here.
      */
     folders?: MediaFolder[] | null

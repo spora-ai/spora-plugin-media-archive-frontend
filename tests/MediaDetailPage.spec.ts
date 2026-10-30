@@ -292,6 +292,38 @@ describe('MediaDetailPage', () => {
         expect(wrapper.find('[data-testid="media-detail-folder"]').text()).toContain('No folder')
     })
 
+    it('shows no folder name for an asset from a core without the folders release', async () => {
+        // A core that predates the release sends no `folder_id` at all,
+        // which is the same thing as the root.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-detail-folder"]').text()).toContain('No folder')
+    })
+
+    it('shows an unknown folder when the asset is filed in a folder the panel cannot resolve', async () => {
+        // The asset's principal is not among the visible ones (the asset
+        // was opened directly by URL), or that principal's folders failed
+        // to load. The asset IS filed in a folder, so "No folder" would
+        // be a false claim.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: 'folder-x' })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, {
+            props: {
+                assetId: sample.id,
+                hostContext,
+                folders: [
+                    { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                ],
+            },
+        })
+        await flushPromises()
+        const folder = wrapper.find('[data-testid="media-detail-folder"]').text()
+        expect(folder).toContain('Unknown folder')
+        expect(folder).not.toContain('No folder')
+    })
+
     it('saves a changed kind', async () => {
         const get = vi.fn().mockResolvedValueOnce(sample)
         const { hostContext, api } = buildHostContext(get)

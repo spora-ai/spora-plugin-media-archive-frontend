@@ -96,7 +96,16 @@ const defaultFolders: Record<number, MediaFolder[]> = {
 function buildContext(
     get: ReturnType<typeof vi.fn>,
     route?: { path: string },
-    mediaHandlers?: { principals?: MediaPrincipal[]; groups?: MediaGroup[]; folders?: Record<number, MediaFolder[]> },
+    mediaHandlers?: {
+        principals?: MediaPrincipal[]
+        groups?: MediaGroup[]
+        folders?: Record<number, MediaFolder[]>
+        /**
+         * Make the folders endpoint answer with this status. A 404 is
+         * what a core predating the folders release answers with.
+         */
+        foldersStatus?: number
+    },
 ): PluginHostContext {
     const principals = mediaHandlers?.principals ?? defaultPrincipals
     const groups = mediaHandlers?.groups ?? defaultGroups
@@ -115,6 +124,15 @@ function buildContext(
         // The folders are principal-scoped, so the path carries the
         // principal as a query parameter.
         if (path.startsWith('/media/folders')) {
+            if (mediaHandlers?.foldersStatus !== undefined) {
+                // The host's client throws an ApiError carrying the
+                // status; the panel reads it by shape.
+                return Promise.reject(
+                    Object.assign(new Error(`HTTP ${mediaHandlers.foldersStatus}`), {
+                        status: mediaHandlers.foldersStatus,
+                    }),
+                )
+            }
             const principalId = Number(/principal_id=(\d+)/.exec(path)?.[1])
             return Promise.resolve({ folders: folders[principalId] ?? [] })
         }
@@ -970,5 +988,43 @@ describe('App.vue', () => {
         await flushPromises()
         const last = get.mock.calls.at(-1)?.[0] ?? ''
         expect(last).not.toContain('folder_id=')
+    })
+
+    it('offers neither the kind filter nor the folder tree when the core has no folders endpoint', async () => {
+        // A 404 on `GET /media/folders` means the core predates the
+        // folders release: it has no folders and it ignores `?kind=`.
+        // Offering a filter the server ignores is worse than offering
+        // none, so the panel drops both surfaces.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get, undefined, { foldersStatus: 404 })
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-kind-pills"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-folder-tree"]').exists()).toBe(false)
+    })
+
+    it('keeps the kind filter when the folders endpoint fails for another reason', async () => {
+        // Any answer other than a 404 means the route exists — the core
+        // has the kinds release — so a transient failure must not take
+        // the filter away.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get, undefined, { foldersStatus: 500 })
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-kind-pills"]').exists()).toBe(true)
+    })
+
+    it('probes the folders endpoint when the caller has no visible principal', async () => {
+        // Without a principal there is no folder to list, so the
+        // per-principal requests never fire — and without the probe the
+        // panel would offer a kind filter against a core that ignores it.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get, undefined, { principals: [], groups: [], foldersStatus: 404 })
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-kind-pills"]').exists()).toBe(false)
     })
 })

@@ -26,6 +26,7 @@ import type {
     MediaListResponse,
     MediaPrincipal,
     MediaType,
+    ScopedMediaFolder,
 } from './types'
 import { extractAssetId } from './lib/route-detection'
 import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
@@ -110,6 +111,18 @@ const groupLabelsByPrincipalId = ref<Record<number, string>>({})
  */
 const foldersByPrincipal = ref<Record<number, MediaFolder[]>>({})
 
+/**
+ * Whether the core carries the folders release.
+ *
+ * `GET /media/folders`, `media_assets.folder_id` and `media_assets.kind`
+ * ship in the same core release, so a **404** on the folders endpoint is
+ * the capability probe: such a core ignores `?kind=` and has no folders,
+ * and a filter the server ignores is worse than no filter at all. Any
+ * other answer means the route exists, so the panel keeps offering what
+ * it offers — a transient failure must not take the filters away.
+ */
+const foldersSupported = ref(true)
+
 const scopeLoading = ref(false)
 
 const total = ref(0)
@@ -166,7 +179,10 @@ let requestId = 0
  * filter with no rows at all).
  *
  * Best-effort, like the group labels: a principal whose folders cannot
- * be read contributes an empty tree rather than an error.
+ * be read contributes an empty tree rather than an error. The one
+ * answer that is not best-effort is the 404 — it says the core has no
+ * folders endpoint at all, and the panel stops offering the filters
+ * such a core ignores.
  */
 async function bootstrapFolders(): Promise<void> {
     const principals = visiblePrincipals.value
@@ -177,7 +193,10 @@ async function bootstrapFolders(): Promise<void> {
                     `/media/folders?principal_id=${principal.id}`,
                 )
                 return [principal.id, response.folders ?? []] as const
-            } catch {
+            } catch (e) {
+                if (isNotFound(e)) {
+                    foldersSupported.value = false
+                }
                 return [principal.id, [] as MediaFolder[]] as const
             }
         }),
@@ -187,6 +206,43 @@ async function bootstrapFolders(): Promise<void> {
         next[principalId] = list
     }
     foldersByPrincipal.value = next
+    if (principals.length === 0) {
+        // Nothing to list, but the endpoint's existence is still the
+        // capability probe.
+        await probeFoldersSupport()
+    }
+}
+
+/**
+ * Ask the folders endpoint once, without naming a principal, to learn
+ * whether the core has it.
+ *
+ * Only used when the caller has no visible principal: with none, the
+ * per-principal requests never fire, and without a probe the panel
+ * would offer a kind filter against a core that ignores it.
+ */
+async function probeFoldersSupport(): Promise<void> {
+    try {
+        await api.value.get('/media/folders')
+    } catch (e) {
+        if (isNotFound(e)) {
+            foldersSupported.value = false
+        }
+    }
+}
+
+/**
+ * Whether a failed request answered 404.
+ *
+ * The host's client throws an `ApiError` carrying the HTTP status; the
+ * plugin's shim types a rejection as `unknown`, so the status is read
+ * by shape.
+ */
+function isNotFound(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) {
+        return false
+    }
+    return (error as { status?: unknown }).status === 404
 }
 
 /**
@@ -196,14 +252,21 @@ async function bootstrapFolders(): Promise<void> {
  * hold the folders of several principals: a folder's parent always
  * belongs to the same principal, and the paths of two principals can
  * collide without colliding the tree (the ids differ).
+ *
+ * `path` is unique per principal and not globally, so two principals may
+ * own a folder with the same name — the principal travels with the
+ * folder, because the tree has to say whose assets a folder filter
+ * would return.
  */
-const scopedFolders = computed<MediaFolder[]>(() => {
+const scopedFolders = computed<ScopedMediaFolder[]>(() => {
     const ids = selectedScope.value !== null
         ? [selectedScope.value]
         : visiblePrincipals.value.map((principal) => principal.id)
-    const out: MediaFolder[] = []
+    const out: ScopedMediaFolder[] = []
     for (const id of ids) {
-        out.push(...(foldersByPrincipal.value[id] ?? []))
+        for (const folder of foldersByPrincipal.value[id] ?? []) {
+            out.push({ ...folder, principal_id: id })
+        }
     }
     return out
 })
@@ -600,6 +663,7 @@ onBeforeUnmount(() => {
                 :folders="scopedFolders"
                 :selected-folder-id="query.folderId ?? null"
                 :kind="query.kind ?? ''"
+                :folders-supported="foldersSupported"
                 @update:type="setType"
                 @update:search="setSearch"
                 @update:scope="setScope"

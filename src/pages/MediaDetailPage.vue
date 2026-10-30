@@ -325,6 +325,19 @@ const isShared = computed(() => asset.value !== null && Boolean(asset.value.publ
 const tagsString = computed(() => (asset.value?.tags ?? []).join(', '))
 
 /**
+ * The asset's `folder_id`, or `null` for the root.
+ *
+ * `undefined` (a core predating the folders release) and `null` both
+ * mean "no folder". An id that is set but resolves to no folder is the
+ * third state: the asset IS filed in a folder the panel could not
+ * resolve, which is not the same thing as having no folder.
+ */
+const folderId = computed<string | null>(() => {
+    const id = asset.value?.folder_id
+    return typeof id === 'string' && id !== '' ? id : null
+})
+
+/**
  * The asset's folder, resolved from the folder list the parent holds.
  *
  * The asset carries only a `folder_id`; the name comes from the list.
@@ -332,11 +345,11 @@ const tagsString = computed(() => (asset.value?.tags ?? []).join(', '))
  * shows as unknown rather than as a wrong name.
  */
 const folder = computed<MediaFolder | null>(() => {
-    const folderId = asset.value?.folder_id
-    if (folderId === undefined || folderId === null) {
+    const id = folderId.value
+    if (id === null) {
         return null
     }
-    return props.folders?.find((candidate) => candidate.id === folderId) ?? null
+    return props.folders?.find((candidate) => candidate.id === id) ?? null
 })
 
 /**
@@ -1066,6 +1079,9 @@ onBeforeUnmount(() => {
                         <dt class="text-muted-foreground">{{ t('Folder') }}</dt>
                         <dd class="col-span-2 text-foreground" data-testid="media-detail-folder">
                             <span v-if="folder">{{ folder.name }}</span>
+                            <span v-else-if="folderId !== null" class="text-muted-foreground">
+                                {{ t('Unknown folder') }}
+                            </span>
                             <span v-else class="text-muted-foreground">{{ t('No folder') }}</span>
                         </dd>
 

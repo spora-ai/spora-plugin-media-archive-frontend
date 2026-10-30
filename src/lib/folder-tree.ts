@@ -15,13 +15,13 @@
  */
 import type { MediaFolder } from '../types'
 
-export interface FolderTreeNode {
-    folder: MediaFolder
-    children: FolderTreeNode[]
+export interface FolderTreeNode<T extends MediaFolder = MediaFolder> {
+    folder: T
+    children: FolderTreeNode<T>[]
 }
 
-export interface FolderTreeRow {
-    folder: MediaFolder
+export interface FolderTreeRow<T extends MediaFolder = MediaFolder> {
+    folder: T
     /**
      * 0 for a top-level folder, 1 for its children, and so on — the
      * filter bar indents by it.
@@ -64,18 +64,18 @@ function hasCyclicAncestor(folder: MediaFolder, byId: ReadonlyMap<string, MediaF
  * becomes a root: it stays visible instead of disappearing with a
  * parent the caller never received.
  */
-export function buildFolderTree(folders: readonly MediaFolder[]): FolderTreeNode[] {
-    const byId = new Map<string, MediaFolder>()
+export function buildFolderTree<T extends MediaFolder>(folders: readonly T[]): FolderTreeNode<T>[] {
+    const byId = new Map<string, T>()
     for (const folder of folders) {
         byId.set(folder.id, folder)
     }
 
-    const nodes = new Map<string, FolderTreeNode>()
+    const nodes = new Map<string, FolderTreeNode<T>>()
     for (const folder of folders) {
         nodes.set(folder.id, { folder, children: [] })
     }
 
-    const roots: FolderTreeNode[] = []
+    const roots: FolderTreeNode<T>[] = []
     for (const folder of folders) {
         const node = nodes.get(folder.id)
         if (node === undefined) {
@@ -93,7 +93,7 @@ export function buildFolderTree(folders: readonly MediaFolder[]): FolderTreeNode
         parent.children.push(node)
     }
 
-    const sort = (node: FolderTreeNode): void => {
+    const sort = (node: FolderTreeNode<T>): void => {
         node.children.sort((a, b) => byPath(a.folder, b.folder))
         for (const child of node.children) {
             sort(child)
@@ -113,9 +113,11 @@ export function buildFolderTree(folders: readonly MediaFolder[]): FolderTreeNode
  * The filter bar draws the tree with one button per row, indented by
  * the depth — a flat list keeps the markup free of recursion.
  */
-export function flattenFolderTree(tree: readonly FolderTreeNode[]): FolderTreeRow[] {
-    const rows: FolderTreeRow[] = []
-    const walk = (nodes: readonly FolderTreeNode[], depth: number): void => {
+export function flattenFolderTree<T extends MediaFolder>(
+    tree: readonly FolderTreeNode<T>[],
+): FolderTreeRow<T>[] {
+    const rows: FolderTreeRow<T>[] = []
+    const walk = (nodes: readonly FolderTreeNode<T>[], depth: number): void => {
         for (const node of nodes) {
             rows.push({ folder: node.folder, depth })
             walk(node.children, depth + 1)

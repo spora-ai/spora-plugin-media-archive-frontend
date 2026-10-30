@@ -37,6 +37,19 @@ export interface MediaFolder {
 }
 
 /**
+ * A folder with the principal that owns it.
+ *
+ * The server's listing is principal-scoped — the panel asks once per
+ * visible principal — and does not carry the principal itself. The panel
+ * adds it, because `path` is unique per principal and not globally: two
+ * principals may own a folder with the same name, and only the principal
+ * tells the two apart.
+ */
+export interface ScopedMediaFolder extends MediaFolder {
+    principal_id: number
+}
+
+/**
  * Wire shape for a single derivative row returned inside
  * `MediaAsset.derivatives[]` (see `MediaAssetSerializer::serialize()`
  * in spora-core). The set of formats is open — `string` because a
