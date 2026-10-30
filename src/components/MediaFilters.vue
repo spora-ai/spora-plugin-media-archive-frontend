@@ -1,22 +1,45 @@
 <script setup lang="ts">
 /**
- * MediaFilters — type/search pills plus the dashboard-style scope chip row.
+ * MediaFilters — type/kind pills, the dashboard-style scope chip row and
+ * the folder tree.
  *
  * The scope chip row mirrors `spora-frontend/src/components/dashboard
  * /DashboardFilterChips.vue`: ALL / My Media / Group A / Group B / ...,
- * single-select, click-the-active-chip-to-clear. The `type:
- * 'user' | 'group'` discriminator the parent passes in is the only
- * thing that lets us label the user-principal as `My Media` instead of
- * the `Group #${id}` fallback.
+ * single-select, click-the-active-chip-to-clear. The `type: 'user' |
+ * 'group'` discriminator the parent passes in is the only thing that lets
+ * us label the user-principal as `My Media` instead of the
+ * `Group #${id}` fallback.
+ *
+ * The folder tree is the third filter dimension: the tree's root is the
+ * whole library, every folder hangs below its parent, and each folder
+ * carries the number of assets filed directly in it. The parent owns the
+ * folder list and the selection — this component only draws it.
  *
  * The component is purely presentational: it emits `update:scope` with
- * the chosen principal id (or `null` for ALL) and never touches the
- * API client. The parent owns the `load()` call.
+ * the chosen principal id (or `null` for ALL), `update:folderId` with
+ * the chosen folder (or `null` for the tree's root) and `update:kind`
+ * with the chosen mark, and never touches the API client. The parent
+ * owns the `load()` call.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Image, FileAudio, FileVideo, FileText, Search, User, LayoutGrid, Users } from 'lucide-vue-next'
-import type { MediaPrincipal, MediaType } from '../types'
+import {
+    Image,
+    FileAudio,
+    FileVideo,
+    FileText,
+    Search,
+    User,
+    LayoutGrid,
+    Users,
+    Folder,
+    FolderTree,
+    Package,
+    LayoutTemplate,
+    Lightbulb,
+} from 'lucide-vue-next'
+import type { MediaAssetKind, MediaFolder, MediaPrincipal, MediaType } from '../types'
+import { buildFolderTree, flattenFolderTree } from '../lib/folder-tree'
 import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 
 type Scope = number | null
@@ -27,7 +50,7 @@ interface ScopeChip {
     icon: typeof LayoutGrid
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     type: MediaType | ''
     search: string
     /**
@@ -53,12 +76,33 @@ const props = defineProps<{
      * `My Media (${name})`, otherwise just `My Media`.
      */
     myMediaLabel?: string | null
-}>()
+    /**
+     * The folders of the principals in scope, flat and ordered by path.
+     * The tree is rebuilt from `parent_id` — see `lib/folder-tree.ts`.
+     */
+    folders?: MediaFolder[]
+    /**
+     * The selected folder id, or `null` for the tree's root (the whole
+     * library).
+     */
+    selectedFolderId?: string | null
+    /**
+     * The selected mark, or `''` for every mark.
+     */
+    kind?: MediaAssetKind | ''
+}>(), {
+    myMediaLabel: null,
+    folders: () => [],
+    selectedFolderId: null,
+    kind: '',
+})
 
 const emit = defineEmits<{
     (event: 'update:type', value: MediaType | ''): void
     (event: 'update:search', value: string): void
     (event: 'update:scope', value: Scope): void
+    (event: 'update:folderId', value: string | null): void
+    (event: 'update:kind', value: MediaAssetKind | ''): void
 }>()
 
 const { t } = useI18n()
@@ -81,6 +125,24 @@ const pills: TypePill[] = [
     { value: 'audio', label: 'Audio', icon: FileAudio },
     { value: 'video', label: 'Video', icon: FileVideo },
     { value: 'document', label: t('Documents'), icon: FileText },
+]
+
+interface KindChip {
+    value: MediaAssetKind | ''
+    label: string
+    icon: typeof Package
+}
+
+/**
+ * The advisory mark (`media_assets.kind`). The vocabulary is closed —
+ * core refuses anything else with a 422 — so the row lists exactly the
+ * three marks plus the unfiltered state.
+ */
+const kindChips: KindChip[] = [
+    { value: '', label: t('All'), icon: Search },
+    { value: 'asset', label: t('Asset'), icon: Package },
+    { value: 'template', label: t('Template'), icon: LayoutTemplate },
+    { value: 'example', label: t('Example'), icon: Lightbulb },
 ]
 
 const selected = computed(() => props.type)
@@ -114,6 +176,12 @@ const scopeChips = computed<ReadonlyArray<ScopeChip>>(() => {
     return out
 })
 
+/**
+ * The folder tree as a flat list of rows, each carrying its depth so
+ * the markup can indent it without recursing.
+ */
+const folderRows = computed(() => flattenFolderTree(buildFolderTree(props.folders)))
+
 function isScopeActive(id: Scope): boolean {
     return props.selectedScope === id
 }
@@ -127,6 +195,18 @@ function onScopeClick(id: Scope): void {
         return
     }
     emit('update:scope', id)
+}
+
+function isFolderActive(id: string): boolean {
+    return props.selectedFolderId === id
+}
+
+function onFolderClick(id: string): void {
+    emit('update:folderId', id)
+}
+
+function onRootClick(): void {
+    emit('update:folderId', null)
 }
 
 /**
@@ -163,6 +243,28 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
             </div>
         </div>
 
+        <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap gap-2" data-testid="media-kind-pills">
+                <button
+                    v-for="chip in kindChips"
+                    :key="chip.value || 'all'"
+                    type="button"
+                    class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+                    :class="
+                        kind === chip.value
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                    "
+                    :data-testid="`media-kind-${chip.value || 'all'}`"
+                    :aria-pressed="kind === chip.value"
+                    @click="emit('update:kind', chip.value)"
+                >
+                    <component :is="chip.icon" class="h-3.5 w-3.5" />
+                    {{ chip.label }}
+                </button>
+            </div>
+        </div>
+
         <div
             v-if="scopeChips.length > 1"
             class="flex flex-wrap items-center gap-2"
@@ -186,6 +288,49 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
                 <component :is="chip.icon" class="h-3.5 w-3.5" />
                 {{ chip.label }}
             </button>
+        </div>
+
+        <div class="flex flex-col gap-1" data-testid="media-folder-tree">
+            <button
+                type="button"
+                class="inline-flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+                :class="
+                    selectedFolderId === null
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                "
+                data-testid="media-folder-root"
+                :aria-pressed="selectedFolderId === null"
+                @click="onRootClick"
+            >
+                <FolderTree class="h-3.5 w-3.5" />
+                {{ t('All media') }}
+            </button>
+
+            <button
+                v-for="row in folderRows"
+                :key="row.folder.id"
+                type="button"
+                class="inline-flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+                :class="
+                    isFolderActive(row.folder.id)
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                "
+                :style="{ paddingLeft: `${0.75 + row.depth * 0.9}rem` }"
+                :data-testid="`media-folder-${row.folder.id}`"
+                :data-folder-path="row.folder.path"
+                :aria-pressed="isFolderActive(row.folder.id)"
+                @click="onFolderClick(row.folder.id)"
+            >
+                <Folder class="h-3.5 w-3.5" />
+                <span class="truncate">{{ row.folder.name }}</span>
+                <span class="opacity-70">{{ row.folder.asset_count }}</span>
+            </button>
+
+            <p v-if="folderRows.length === 0" class="text-xs text-muted-foreground" data-testid="media-folder-empty">
+                {{ t('No folders') }}
+            </p>
         </div>
 
         <label class="relative block">

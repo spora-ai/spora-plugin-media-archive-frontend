@@ -5,6 +5,7 @@ import App from '../src/App.vue'
 import MediaFilters from '../src/components/MediaFilters.vue'
 import type {
     MediaAsset,
+    MediaFolder,
     MediaGroup,
     MediaListResponse,
     MediaPrincipal,
@@ -69,6 +70,23 @@ const defaultGroups: MediaGroup[] = [
 ]
 
 /**
+ * The folders of each visible principal.
+ *
+ * The panel asks per principal (`/media/folders?principal_id=…`), and
+ * the server answers with that principal's folders only — so the
+ * fixture is keyed the same way.
+ */
+const defaultFolders: Record<number, MediaFolder[]> = {
+    101: [
+        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 1 },
+    ],
+    202: [
+        { id: 'folder-3', name: 'Brand', path: '/Brand', parent_id: null, asset_count: 4 },
+    ],
+}
+
+/**
  * Build a stub `hostContext` with the `get` mock and the
  * `/principals/me` + `/groups` defaults stubbed in. The defaults
  * mirror what the host returns for an authenticated user with one
@@ -78,10 +96,11 @@ const defaultGroups: MediaGroup[] = [
 function buildContext(
     get: ReturnType<typeof vi.fn>,
     route?: { path: string },
-    mediaHandlers?: { principals?: MediaPrincipal[]; groups?: MediaGroup[] },
+    mediaHandlers?: { principals?: MediaPrincipal[]; groups?: MediaGroup[]; folders?: Record<number, MediaFolder[]> },
 ): PluginHostContext {
     const principals = mediaHandlers?.principals ?? defaultPrincipals
     const groups = mediaHandlers?.groups ?? defaultGroups
+    const folders = mediaHandlers?.folders ?? defaultFolders
     // Wrap the mock so the bootstrap calls resolve to the provided
     // fixtures BEFORE falling through to the user's per-call
     // expectations. The wrapper is transparent to anything that
@@ -92,6 +111,12 @@ function buildContext(
         }
         if (path === '/groups') {
             return Promise.resolve({ groups })
+        }
+        // The folders are principal-scoped, so the path carries the
+        // principal as a query parameter.
+        if (path.startsWith('/media/folders')) {
+            const principalId = Number(/principal_id=(\d+)/.exec(path)?.[1])
+            return Promise.resolve({ folders: folders[principalId] ?? [] })
         }
         // `get` is a `Mock<...>` (callable-or-constructable union);
         // cast to the callable signature so the inner `vi.fn()` body
@@ -391,7 +416,7 @@ describe('App.vue', () => {
         await wrapper.find('[data-testid="media-search"]').setValue('alpine')
         await flushPromises()
         await flushPromises()
-        expect(get.mock.calls.at(-1)?.[0]).toContain('search=alpine')
+        expect(get.mock.calls.at(-1)?.[0]).toContain('q=alpine')
     })
 
     it('navigates to the detail page when a card is selected (route push)', async () => {
@@ -876,5 +901,74 @@ describe('App.vue', () => {
         await flushPromises()
         const firstCall = get.mock.calls.find((c) => c[0]?.startsWith('/media'))?.[0] ?? ''
         expect(firstCall).toContain('include_temporary=true')
+    })
+
+    it('sends the folder id of the picked folder', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('folder_id=folder-1')
+    })
+
+    it('sends the picked kind', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-kind-template"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('kind=template')
+    })
+
+    it('resets to page 1 when the folder selection changes', async () => {
+        // Without the reset the panel would show page 3 of the new
+        // folder's listing.
+        const page3: MediaListResponse = {
+            assets: [sample],
+            page: 3,
+            perPage: 24,
+            total: 60,
+            lastPage: 3,
+        }
+        const get = vi.fn()
+            .mockResolvedValueOnce(page3)
+            .mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('page=1')
+        expect(last).toContain('folder_id=folder-1')
+    })
+
+    it('drops a folder selection that the new scope cannot filter by', async () => {
+        // A folder of a principal outside the scope would filter the
+        // listing down to nothing, so the selection is dropped.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).not.toContain('folder_id=')
     })
 })

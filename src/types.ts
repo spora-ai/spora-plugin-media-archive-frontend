@@ -8,6 +8,35 @@
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'unknown'
 
 /**
+ * The advisory mark on an asset (`media_assets.kind`).
+ *
+ * The vocabulary is closed: core's `MediaAssetKind` lists exactly these
+ * three values and the PATCH surface refuses anything else with a 422.
+ * The mark is a *hint* for the operator UI — nothing in the read or the
+ * write path refuses an asset because of it.
+ */
+export type MediaAssetKind = 'asset' | 'template' | 'example'
+
+/**
+ * A folder of the media library's tree.
+ *
+ * The listing endpoint returns the principal's folders **flat** and
+ * ordered by `path`; the tree is rebuilt on the client from
+ * `parent_id` (see `lib/folder-tree.ts`). `path` is the folder's path
+ * from the tenant root (`/Corporate`, `/Corporate/2026`).
+ *
+ * `asset_count` counts the assets filed *directly* in the folder — the
+ * assets of a subfolder are counted in that subfolder.
+ */
+export interface MediaFolder {
+    id: string
+    name: string
+    path: string
+    parent_id: string | null
+    asset_count: number
+}
+
+/**
  * Wire shape for a single derivative row returned inside
  * `MediaAsset.derivatives[]` (see `MediaAssetSerializer::serialize()`
  * in spora-core). The set of formats is open — `string` because a
@@ -65,6 +94,19 @@ export interface MediaAsset {
     task_id: string | null
     tool_call_id: string | null
     created_at: string
+    /**
+     * The folder the asset is filed in, or `null` for the root.
+     *
+     * Carried by core's `MediaAssetSerializer` since the folders
+     * release. The panel talks to a core that may predate it, so the
+     * field is optional: an absent `folder_id` reads as "no folder".
+     */
+    folder_id?: string | null
+    /**
+     * The advisory mark. Absent on a core that predates the kinds
+     * release — the server's default is `asset`.
+     */
+    kind?: MediaAssetKind
     /**
      * `true` iff the asset is on the temporary-file purge path — see
      * spora-core PR #238. The list endpoint filters these out by
@@ -156,4 +198,18 @@ export interface MediaListQuery {
      * repeated-key wire shape the controller intersects.
      */
     principalIds?: number[]
+    /**
+     * The folder the listing is scoped to, or `null` for every
+     * folder. Sent as the scalar `?folder_id=` — the array-bracket
+     * form is deliberately not used: a multi-folder filter would need
+     * a `WHERE folder_id IN (…)`, and a half-implemented one that
+     * silently returns a single folder's rows is worse than none.
+     */
+    folderId?: string | null
+    /**
+     * The advisory mark the listing is scoped to, or `''` for every
+     * mark. One value per request; an unknown value is dropped by the
+     * server and the listing stays unfiltered.
+     */
+    kind?: MediaAssetKind | ''
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createMockApi, filterFixture, FIXTURE, paginate, parseListQuery } from '../src/dev-mock'
-import type { MediaAsset, MediaListResponse } from '../src/types'
+import type { MediaAsset, MediaFolder, MediaListResponse, MediaPrincipal } from '../src/types'
 
 describe('parseListQuery', () => {
     it('returns defaults when path has no query string', () => {
@@ -8,6 +8,8 @@ describe('parseListQuery', () => {
             type: '',
             plugin: '',
             search: '',
+            folderId: '',
+            kind: '',
             scope: 'all',
             page: 1,
             perPage: 24,
@@ -15,10 +17,12 @@ describe('parseListQuery', () => {
     })
 
     it('extracts each supported param', () => {
-        expect(parseListQuery('/media?type=audio&plugin=minimax&search=hello&page=2&per_page=5')).toEqual({
+        expect(parseListQuery('/media?type=audio&plugin_slug=minimax&q=hello&page=2&per_page=5')).toEqual({
             type: 'audio',
             plugin: 'minimax',
             search: 'hello',
+            folderId: '',
+            kind: '',
             scope: 'all',
             page: 2,
             perPage: 5,
@@ -32,7 +36,7 @@ describe('parseListQuery', () => {
     })
 
     it('lowercases and trims the search term', () => {
-        expect(parseListQuery('/media?search=  Hello  ').search).toBe('hello')
+        expect(parseListQuery('/media?q=  Hello  ').search).toBe('hello')
     })
 
     it('clamps page and per_page to a minimum of 1', () => {
@@ -51,40 +55,40 @@ describe('filterFixture', () => {
     const corpus: MediaAsset[] = FIXTURE
 
     it('returns the full fixture when no filters are set', () => {
-        expect(filterFixture({ type: '', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
+        expect(filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
     })
 
     it('filters by media_type', () => {
-        const result = filterFixture({ type: 'image', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: '', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.length).toBeGreaterThan(0)
         expect(result.every((a) => a.media_type === 'image')).toBe(true)
     })
 
     it('filters by plugin_slug', () => {
-        const result = filterFixture({ type: '', plugin: 'tavily', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.plugin_slug === 'tavily')).toBe(true)
     })
 
     it('filters by case-insensitive prompt substring', () => {
-        const result = filterFixture({ type: '', plugin: '', search: 'alpine', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: '', search: 'alpine', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.some((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
         expect(result.every((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
     })
 
     it('combines multiple filters with AND semantics', () => {
-        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.media_type === 'image' && a.plugin_slug === 'minimax')).toBe(true)
     })
 
     it('returns an empty array when nothing matches', () => {
-        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toEqual([])
+        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toEqual([])
     })
 
     it('filters by scope=mine to the current user only', () => {
-        const mine = filterFixture({ type: '', plugin: '', search: '', scope: 'mine', page: 1, perPage: 24 }, corpus)
+        const mine = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'mine', page: 1, perPage: 24 }, corpus)
         expect(mine.length).toBeGreaterThan(0)
         expect(mine.every((a) => (a as unknown as { user_id: number }).user_id === 42)).toBe(true)
-        const all = filterFixture({ type: '', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const all = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
         expect(all.length).toBeGreaterThan(mine.length)
     })
 })
@@ -135,6 +139,30 @@ describe('createMockApi', () => {
         expect(page1.lastPage).toBeGreaterThan(1)
         expect(page2.page).toBe(2)
         expect(page2.assets[0]?.id).not.toBe(page1.assets[0]?.id)
+    })
+
+    it('answers the principals endpoint so the folder tree has a principal', async () => {
+        const result = await api.get<{ principals: MediaPrincipal[] }>('/principals/me')
+        expect(result.principals).toHaveLength(1)
+        expect(result.principals[0]?.type).toBe('user')
+    })
+
+    it('returns the folder tree for the folders endpoint', async () => {
+        const result = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=42')
+        expect(result.folders.length).toBeGreaterThan(0)
+        expect(result.folders[0]?.parent_id).toBeNull()
+    })
+
+    it('narrows results by ?folder_id=', async () => {
+        const result = await api.get<MediaListResponse>('/media?folder_id=folder-templates')
+        expect(result.assets.every((a) => a.folder_id === 'folder-templates')).toBe(true)
+        expect(result.total).toBe(result.assets.length)
+    })
+
+    it('narrows results by ?kind=', async () => {
+        const result = await api.get<MediaListResponse>('/media?kind=template')
+        expect(result.assets.every((a) => a.kind === 'template')).toBe(true)
+        expect(result.total).toBe(result.assets.length)
     })
 
     it('rejects write verbs', async () => {

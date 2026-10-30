@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MediaFilters from '../src/components/MediaFilters.vue'
-import type { MediaPrincipal } from '../src/types'
+import type { MediaAssetKind, MediaFolder, MediaPrincipal } from '../src/types'
 import { __resetShowTemporaryToggleForTesting, useShowTemporaryToggle } from '../src/composables/useShowTemporaryToggle'
 
 /**
@@ -119,6 +119,115 @@ describe('MediaFilters.vue scope chip row', () => {
         })
         expect(wrapper.find('[data-testid="media-type-pills"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-search"]').exists()).toBe(true)
+    })
+})
+
+describe('MediaFilters.vue folder tree', () => {
+    const folders: MediaFolder[] = [
+        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 12 },
+        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 3 },
+        { id: 'folder-3', name: 'Brand', path: '/Brand', parent_id: null, asset_count: 0 },
+    ]
+
+    function mountFilters(overrides: Record<string, unknown> = {}) {
+        return mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [userPrincipal],
+                selectedScope: null,
+                groupLabels: {},
+                folders,
+                selectedFolderId: null,
+                kind: '',
+                ...overrides,
+            },
+        })
+    }
+
+    it('renders the root and every folder of the tree', () => {
+        const wrapper = mountFilters()
+        expect(wrapper.find('[data-testid="media-folder-root"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-folder-folder-1"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-folder-folder-2"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-folder-folder-3"]').exists()).toBe(true)
+    })
+
+    it('nests a child folder under its parent', () => {
+        const wrapper = mountFilters()
+        const indentOf = (id: string): number => {
+            const style = wrapper.find(`[data-testid="media-folder-${id}"]`).attributes('style') ?? ''
+            const match = /padding-left:\s*([\d.]+)rem/.exec(style)
+            return match ? Number(match[1]) : 0
+        }
+        // The child is indented one step further than its parent.
+        expect(indentOf('folder-2')).toBeGreaterThan(indentOf('folder-1'))
+        expect(indentOf('folder-3')).toBe(indentOf('folder-1'))
+    })
+
+    it('shows the asset count of each folder', () => {
+        const wrapper = mountFilters()
+        expect(wrapper.find('[data-testid="media-folder-folder-1"]').text()).toContain('12')
+        expect(wrapper.find('[data-testid="media-folder-folder-3"]').text()).toContain('0')
+    })
+
+    it('emits the picked folder id', async () => {
+        const wrapper = mountFilters()
+        await wrapper.find('[data-testid="media-folder-folder-2"]').trigger('click')
+        expect(wrapper.emitted('update:folderId')?.[0]).toEqual(['folder-2'])
+    })
+
+    it('emits null when the root is picked, clearing the folder filter', async () => {
+        const wrapper = mountFilters({ selectedFolderId: 'folder-1' })
+        await wrapper.find('[data-testid="media-folder-root"]').trigger('click')
+        expect(wrapper.emitted('update:folderId')?.[0]).toEqual([null])
+    })
+
+    it('marks the selected folder as pressed', () => {
+        const wrapper = mountFilters({ selectedFolderId: 'folder-2' })
+        expect(wrapper.find('[data-testid="media-folder-folder-2"]').attributes('aria-pressed')).toBe('true')
+        expect(wrapper.find('[data-testid="media-folder-folder-1"]').attributes('aria-pressed')).toBe('false')
+    })
+
+    it('shows an empty state when the principal has no folders', () => {
+        const wrapper = mountFilters({ folders: [] })
+        expect(wrapper.find('[data-testid="media-folder-empty"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-folder-folder-1"]').exists()).toBe(false)
+    })
+})
+
+describe('MediaFilters.vue kind chips', () => {
+    function mountFilters(kind: MediaAssetKind | '' = '') {
+        return mount(MediaFilters, {
+            props: {
+                type: '',
+                search: '',
+                principals: [userPrincipal],
+                selectedScope: null,
+                groupLabels: {},
+                kind,
+            },
+        })
+    }
+
+    it('offers the three marks and the unfiltered state', () => {
+        const wrapper = mountFilters()
+        expect(wrapper.find('[data-testid="media-kind-all"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-kind-asset"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-kind-template"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-kind-example"]').exists()).toBe(true)
+    })
+
+    it('emits the picked mark', async () => {
+        const wrapper = mountFilters()
+        await wrapper.find('[data-testid="media-kind-template"]').trigger('click')
+        expect(wrapper.emitted('update:kind')?.[0]).toEqual(['template'])
+    })
+
+    it('marks the selected kind as pressed', () => {
+        const wrapper = mountFilters('example')
+        expect(wrapper.find('[data-testid="media-kind-example"]').attributes('aria-pressed')).toBe('true')
+        expect(wrapper.find('[data-testid="media-kind-asset"]').attributes('aria-pressed')).toBe('false')
     })
 })
 

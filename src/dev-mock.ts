@@ -5,12 +5,12 @@
  * `dev-main.ts`.
  *
  * The mock honors the same query params the PHP controller supports
- * (`type`, `plugin`, `search`, `scope`, `page`, `per_page`) so the filter
+ * (`type`, `plugin_slug`, `q`, `scope`, `page`, `per_page`) so the filter
  * UI is exercisable end-to-end without a database. For real DB-backed
  * testing, run the host SPA + this plugin's dev server + PHP together
  * (see `spora-frontend/vite.config.ts → SPORA_PLUGIN_DEV_PORTS`).
  */
-import type { MediaAsset } from './types'
+import type { MediaAsset, MediaFolder, MediaPrincipal } from './types'
 import type { PluginHostContext } from './shims'
 
 interface MockAsset extends MediaAsset {
@@ -54,6 +54,8 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't1',
         tool_call_id: 'tc1',
         created_at: new Date().toISOString(),
+        folder_id: 'folder-corporate',
+        kind: 'example',
         derivatives: [],
     },
     {
@@ -146,6 +148,8 @@ export const FIXTURE: MockAsset[] = [
         task_id: 't5',
         tool_call_id: 'tc5',
         created_at: new Date(Date.now() - 172800000).toISOString(),
+        folder_id: 'folder-templates',
+        kind: 'template',
         derivatives: [
             {
                 format: 'md',
@@ -163,12 +167,39 @@ export const FIXTURE: MockAsset[] = [
 
 export const CURRENT_USER_ID = 42
 
+/**
+ * The folders of the mock principal.
+ *
+ * The panel asks per principal (`/media/folders?principal_id=…`), and
+ * the tree is rebuilt from `parent_id` — so the fixture carries both.
+ */
+export const FOLDER_FIXTURE: MediaFolder[] = [
+    { id: 'folder-corporate', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+    { id: 'folder-templates', name: 'Templates', path: '/Corporate/Templates', parent_id: 'folder-corporate', asset_count: 1 },
+]
+
+/**
+ * The principal the sandbox acts as.
+ *
+ * The panel asks `/principals/me` before it asks for the folders, and
+ * the folder tree follows the scope chip row — so the sandbox needs a
+ * principal for the tree to render at all.
+ */
+export const PRINCIPAL_FIXTURE: MediaPrincipal = {
+    id: 1,
+    type: 'user',
+    user_id: CURRENT_USER_ID,
+    group_id: null,
+}
+
 export type Scope = 'all' | 'mine'
 
 export interface ListQuery {
     type: string
     plugin: string
     search: string
+    folderId: string
+    kind: string
     scope: Scope
     page: number
     perPage: number
@@ -183,8 +214,11 @@ export function parseListQuery(path: string): ListQuery {
     const scope: Scope = scopeRaw === 'mine' ? 'mine' : 'all'
     return {
         type: params.get('type') ?? '',
-        plugin: params.get('plugin') ?? '',
-        search: (params.get('search') ?? '').trim().toLowerCase(),
+        // The canonical spellings core reads; the panel sends these.
+        plugin: params.get('plugin_slug') ?? '',
+        search: (params.get('q') ?? '').trim().toLowerCase(),
+        folderId: params.get('folder_id') ?? '',
+        kind: params.get('kind') ?? '',
         scope,
         page: pageRaw === null ? 1 : Math.max(1, Number(pageRaw) || 1),
         perPage: perPageRaw === null ? 24 : Math.max(1, Number(perPageRaw) || 1),
@@ -199,6 +233,8 @@ export function filterFixture(query: ListQuery, source: MediaAsset[] = FIXTURE a
         }
         if (query.type && asset.media_type !== query.type) return false
         if (query.plugin && asset.plugin_slug !== query.plugin) return false
+        if (query.folderId && asset.folder_id !== query.folderId) return false
+        if (query.kind && (asset.kind ?? 'asset') !== query.kind) return false
         if (query.search) {
             const haystack = (asset.prompt ?? '').toLowerCase()
             if (!haystack.includes(query.search)) return false
@@ -215,6 +251,12 @@ export function paginate<T>(items: T[], page: number, perPage: number): T[] {
 export function createMockApi(): PluginHostContext['api'] {
     return {
         async get<T>(path: string): Promise<T> {
+            if (path === '/principals/me') {
+                return { principals: [PRINCIPAL_FIXTURE] } as unknown as T
+            }
+            if (path.startsWith('/media/folders')) {
+                return { folders: FOLDER_FIXTURE } as unknown as T
+            }
             if (path.startsWith('/media/') && path !== '/media') {
                 const id = path.slice('/media/'.length).split('?')[0]
                 const found = FIXTURE.find((m) => m.id === id)

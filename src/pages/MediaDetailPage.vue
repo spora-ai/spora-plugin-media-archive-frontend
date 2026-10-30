@@ -14,7 +14,7 @@ import {
     Trash2,
     X,
 } from 'lucide-vue-next'
-import type { MediaAsset, MediaDerivative } from '../types'
+import type { MediaAsset, MediaAssetKind, MediaDerivative, MediaFolder } from '../types'
 import type { PluginHostContext } from '../shims'
 import { MdPreview } from 'md-editor-v3'
 // Deliberately kept although the editor is gone: `<MdPreview>` needs its typography.
@@ -27,6 +27,11 @@ const MARKDOWN_LOCALE = 'en-US'
 const props = defineProps<{
     assetId: string
     hostContext: PluginHostContext
+    /**
+     * The folders of the visible principals. The asset carries only a
+     * `folder_id`, so the folder's name comes from here.
+     */
+    folders?: MediaFolder[]
 }>()
 
 const emit = defineEmits<{
@@ -318,6 +323,74 @@ const downloadLabel = computed<string>(() => {
 const isShared = computed(() => asset.value !== null && Boolean(asset.value.public_url))
 
 const tagsString = computed(() => (asset.value?.tags ?? []).join(', '))
+
+/**
+ * The asset's folder, resolved from the folder list the parent holds.
+ *
+ * The asset carries only a `folder_id`; the name comes from the list.
+ * A folder outside the visible principals is not in the list, so it
+ * shows as unknown rather than as a wrong name.
+ */
+const folder = computed<MediaFolder | null>(() => {
+    const folderId = asset.value?.folder_id
+    if (folderId === undefined || folderId === null) {
+        return null
+    }
+    return props.folders?.find((candidate) => candidate.id === folderId) ?? null
+})
+
+/**
+ * The mark on the asset.
+ *
+ * The mark is advisory — nothing refuses an asset because of it — and
+ * the operator owns it, so it is editable here. A core that predates
+ * the kinds release sends no mark at all, which reads as the default.
+ */
+const kind = computed<MediaAssetKind>(() => asset.value?.kind ?? 'asset')
+
+/**
+ * What the select shows.
+ *
+ * A rejected PATCH leaves the server's mark unchanged, and a bound
+ * `:value` is not re-patched when the bound value does not change — so
+ * the select would keep showing a mark the server never accepted. The
+ * local ref is reset from the server's mark on every change.
+ */
+const kindSelection = ref<MediaAssetKind>('asset')
+
+watch(kind, (value) => {
+    kindSelection.value = value
+}, { immediate: true })
+
+/**
+ * The three marks, with their labels.
+ *
+ * The labels are literal so the i18n extractor can harvest them; a
+ * computed key would leave the catalogue without the strings.
+ */
+const KIND_OPTIONS: ReadonlyArray<{ value: MediaAssetKind; label: string }> = [
+    { value: 'asset', label: t('Asset') },
+    { value: 'template', label: t('Template') },
+    { value: 'example', label: t('Example') },
+]
+
+async function setKind(next: MediaAssetKind): Promise<void> {
+    if (asset.value === null || next === kind.value) {
+        return
+    }
+    const result = await mutate({
+        field: 'kind',
+        verb: 'patch',
+        path: `/media/${asset.value.id}`,
+        body: { kind: next },
+        successToast: t('Kind updated'),
+    })
+    if (result?.updated) {
+        emit('updated', result.updated)
+        return
+    }
+    kindSelection.value = kind.value
+}
 
 function showToast(message: string): void {
     toast.value = message
@@ -989,6 +1062,31 @@ onBeforeUnmount(() => {
 
                         <dt class="text-muted-foreground">{{ t('Storage') }}</dt>
                         <dd class="col-span-2 text-foreground">{{ asset.storage_mode }}</dd>
+
+                        <dt class="text-muted-foreground">{{ t('Folder') }}</dt>
+                        <dd class="col-span-2 text-foreground" data-testid="media-detail-folder">
+                            <span v-if="folder">{{ folder.name }}</span>
+                            <span v-else class="text-muted-foreground">{{ t('No folder') }}</span>
+                        </dd>
+
+                        <dt class="text-muted-foreground">{{ t('Kind') }}</dt>
+                        <dd class="col-span-2">
+                            <select
+                                v-model="kindSelection"
+                                :disabled="savingField !== null"
+                                class="rounded border border-border bg-background px-2 py-1 text-foreground disabled:opacity-50"
+                                data-testid="media-detail-kind"
+                                @change="setKind(kindSelection)"
+                            >
+                                <option
+                                    v-for="option in KIND_OPTIONS"
+                                    :key="option.value"
+                                    :value="option.value"
+                                >
+                                    {{ option.label }}
+                                </option>
+                            </select>
+                        </dd>
 
                         <dt class="text-muted-foreground">Tags</dt>
                         <dd v-if="editingField !== 'tags'" class="col-span-2">
