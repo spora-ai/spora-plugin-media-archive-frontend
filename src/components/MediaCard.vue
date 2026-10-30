@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Image, FileAudio, FileVideo, FileText } from 'lucide-vue-next'
-import type { MediaAsset } from '../types'
+import { Image, FileAudio, FileVideo, FileText, Folder } from 'lucide-vue-next'
+import type { MediaAsset, MediaFolder } from '../types'
 import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 
-const props = defineProps<{ asset: MediaAsset }>()
+const props = defineProps<{
+    asset: MediaAsset
+    /**
+     * The folder the asset is filed in, resolved from the folder list.
+     * `null` for an asset in the root — the card then shows no badge.
+     */
+    folder?: MediaFolder | null
+}>()
 
 const { t } = useI18n()
 
@@ -98,6 +105,14 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
             <div class="flex min-w-0 flex-col">
                 <span class="truncate font-medium text-foreground" data-testid="media-card-filename">
                     {{ asset.filename ?? asset.id }}
+                </span>
+                <span
+                    v-if="folder"
+                    class="inline-flex w-fit items-center gap-1 text-muted-foreground"
+                    data-testid="media-card-folder"
+                >
+                    <Folder class="h-3 w-3 shrink-0" />
+                    <span class="truncate">{{ folder.name }}</span>
                 </span>
                 <span
                     v-if="asset.plugin_slug"

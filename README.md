@@ -13,6 +13,7 @@ Pre-built Vue SPA for the Spora **Media Archive** admin panel. Delivered as a Co
 The detail drawer (right-side panel that opens when a card is selected) covers the operational lifecycle of a media asset:
 
 - Inline rename of the filename, tags, and prompt via accessible `<form>` edit patterns (click-to-edit, Esc/Cancel reverts).
+- The asset's folder (read-only — the folder list is the operator's to curate) and its kind (editable: the mark is the operator's, per the plan's decision D2).
 - Public-share toggle, copy-URL, and token rotation — all routed through the host's typed API client (`hostContext.api`) so CSRF, base URL, and envelope unwrap are handled centrally.
 - Delete confirmation via a real `<dialog>` element (replaces the old `window.confirm`) with a focus-trapped Cancel/Delete pair.
 - Lightbox preview for image and video assets with `aria-modal="true"`, save-and-restore focus on close, and `Escape` / click-outside dismissal.
@@ -27,7 +28,7 @@ The detail drawer (right-side panel that opens when a card is selected) covers t
 
 - The grid renders 24 rows per page; if the response carries `lastPage > 1` a 'Load more' button appears under the cards with a 'Showing N of total' counter.
 - Clicking appends the next page; rows are deduplicated by id against the existing rows so a concurrent insert landing the same row on consecutive pages doesn't render it twice.
-- Filter changes (type pill, search, scope chip) reset to page 1 — the Load-more button disappears when `lastPage` drops back to 1.
+- Filter changes (type pill, kind chip, folder, search, scope chip) reset to page 1 — the Load-more button disappears when `lastPage` drops back to 1.
 
 ## Scope chip row
 
@@ -36,6 +37,27 @@ The grid mounts a dashboard-style `ALL / My Media / Group A / …` chip row abov
 - Pulls `/principals/me` + `/groups` on mount to populate the chip labels; both calls are best-effort so a transient failure leaves the empty-label fallback (`Group #N`) without blocking the grid.
 - Translates the single-pick chip state into repeated `?principal_id=` keys on the listing request — `ALL` sends every visible principal, `My Media` sends just the user-principal, a group chip sends just that group's principal. The controller intersects with `visiblePrincipalIds()`, so an out-of-scope id never reaches the service.
 - Click-the-active-chip-to-clear: matches the dashboard's flag-chip toggle behaviour.
+
+## Folder tree
+
+The filter bar carries a tree of the media library's folders, built on the client from the flat `parent_id` list the server returns:
+
+- `GET /media/folders?principal_id=…` answers per principal, so the panel asks once per visible principal and keeps the answers apart. The tree shows the folders of the principals **in scope**: a folder of a principal outside the scope would filter the listing down to nothing, so it is not offered.
+- The tree's root is the whole library; picking a folder sends the scalar `?folder_id=<uuid>`. The array-bracket form is deliberately not used — a multi-folder filter would need a `WHERE folder_id IN (…)`, and a half-implemented one that silently returns a single folder's rows is worse than none.
+- Each folder shows the number of assets filed *directly* in it, and the root carries no count (the endpoint does not report one).
+- Changing the scope drops a folder selection the new scope cannot filter by.
+
+## Kind filter
+
+An `asset / template / example` chip row next to the type pills, plus an unfiltered state:
+
+- The mark is advisory — nothing in the read or the write path refuses an asset because of it — and the operator owns it, so the detail page offers it as a select that PATCHes `{"kind": …}`.
+- The listing request carries one `?kind=` value; the server drops an unknown one and leaves the listing unfiltered.
+
+## Upload
+
+- The upload dialog attributes the file to one of the operator's visible principals, and can file it into one of **that** principal's folders. The picker offers only the selected principal's folders — the server files the upload into the principal the form names and refuses a folder of another one, so offering them would be offering a 422.
+- Changing the principal drops the picked folder.
 
 ## Build
 

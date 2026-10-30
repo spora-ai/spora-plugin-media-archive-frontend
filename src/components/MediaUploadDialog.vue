@@ -19,7 +19,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Upload, X } from 'lucide-vue-next'
-import type { MediaAsset, MediaPrincipal } from '../types'
+import type { MediaAsset, MediaFolder, MediaPrincipal } from '../types'
 import type { PluginHostContext } from '../shims'
 
 interface AllowedTypes {
@@ -47,9 +47,18 @@ interface Props {
      * in the same scope the operator was already browsing.
      */
     defaultPrincipalId: number | null
+    /**
+     * The folders of the visible principals, keyed by principal id.
+     * The picker offers the folders of the selected principal, so the
+     * upload is filed into a folder of the principal it lands in —
+     * the server refuses a folder of another principal.
+     */
+    foldersByPrincipal?: Record<number, MediaFolder[]>
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+    foldersByPrincipal: () => ({}),
+})
 
 const emit = defineEmits<{
     (event: 'uploaded', asset: MediaAsset): void
@@ -61,6 +70,8 @@ const { t } = useI18n()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const file = ref<File | null>(null)
 const principalId = ref<number | null>(null)
+/** The picked folder id, or `''` for the root. */
+const folderId = ref<string>('')
 const prompt = ref('')
 const tags = ref('')
 const uploading = ref(false)
@@ -93,6 +104,19 @@ const principalOptions = computed(() =>
         id: p.id,
         label: labelForPrincipal(p),
     })),
+)
+
+/**
+ * The folders of the selected principal, as `<option>` rows.
+ *
+ * Only the selected principal's folders are offered: the server files
+ * the upload into the principal the form names and refuses a folder of
+ * another one, so offering them would be offering a 422.
+ */
+const folderOptions = computed(() =>
+    (principalId.value === null ? [] : props.foldersByPrincipal[principalId.value] ?? []).map(
+        (folder) => ({ id: folder.id, label: folder.name }),
+    ),
 )
 
 /**
@@ -138,6 +162,7 @@ function open(): void {
     prompt.value = ''
     tags.value = ''
     principalId.value = resolveInitialPrincipal()
+    folderId.value = ''
     void loadAllowedTypes()
     dialogRef.value?.showModal()
 }
@@ -195,6 +220,9 @@ async function submit(): Promise<void> {
         const form = new FormData()
         form.append('file', picked)
         form.append('principal_id', String(principal))
+        if (folderId.value !== '') {
+            form.append('folder_id', folderId.value)
+        }
         if (picked.name !== '') {
             form.append('filename', picked.name)
         }
@@ -240,6 +268,13 @@ watch(() => props.principals, () => {
         || !props.principals.some((p) => p.id === principalId.value)) {
         principalId.value = resolveInitialPrincipal()
     }
+})
+
+// The chosen folder belongs to a principal; changing the principal
+// invalidates it, and a folder of another principal is refused by the
+// server.
+watch(principalId, () => {
+    folderId.value = ''
 })
 
 onBeforeUnmount(() => {
@@ -303,6 +338,25 @@ onBeforeUnmount(() => {
                         >
                             <option
                                 v-for="opt in principalOptions"
+                                :key="opt.id"
+                                :value="opt.id"
+                            >
+                                {{ opt.label }}
+                            </option>
+                        </select>
+                    </label>
+
+                    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+                        {{ t('Folder (optional)') }}
+                        <select
+                            v-model="folderId"
+                            class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-60"
+                            :disabled="folderOptions.length === 0"
+                            data-testid="upload-folder-select"
+                        >
+                            <option value="">{{ t('No folder') }}</option>
+                            <option
+                                v-for="opt in folderOptions"
                                 :key="opt.id"
                                 :value="opt.id"
                             >

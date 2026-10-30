@@ -19,11 +19,14 @@ import { FileAudio, FileVideo, FileText, Image, Search, Upload } from 'lucide-vu
 import type { PluginHostContext } from './shims'
 import type {
     MediaAsset,
+    MediaAssetKind,
+    MediaFolder,
     MediaGroup,
     MediaListQuery,
     MediaListResponse,
     MediaPrincipal,
     MediaType,
+    ScopedMediaFolder,
 } from './types'
 import { extractAssetId } from './lib/route-detection'
 import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
@@ -64,6 +67,8 @@ const query = ref<MediaListQuery>({
     mediaType: '',
     pluginSlug: '',
     search: '',
+    folderId: null,
+    kind: '',
 })
 
 /**
@@ -93,6 +98,30 @@ const visiblePrincipals = ref<MediaPrincipal[]>([])
  * while the lookup is in flight.
  */
 const groupLabelsByPrincipalId = ref<Record<number, string>>({})
+
+/**
+ * The folders of each visible principal, keyed by principal id.
+ *
+ * The folders API is principal-scoped — `GET /media/folders` answers
+ * for one principal (`?principal_id=`, or the caller's own principal
+ * when the parameter is absent). The panel is principal-first too, so
+ * the tree follows the scope chip row: the folders of the principals in
+ * scope, and nothing else. A folder of a principal outside the scope
+ * would filter the listing down to nothing, so it is not offered.
+ */
+const foldersByPrincipal = ref<Record<number, MediaFolder[]>>({})
+
+/**
+ * Whether the core carries the folders release.
+ *
+ * `GET /media/folders`, `media_assets.folder_id` and `media_assets.kind`
+ * ship in the same core release, so a **404** on the folders endpoint is
+ * the capability probe: such a core ignores `?kind=` and has no folders,
+ * and a filter the server ignores is worse than no filter at all. Any
+ * other answer means the route exists, so the panel keeps offering what
+ * it offers — a transient failure must not take the filters away.
+ */
+const foldersSupported = ref(true)
 
 const scopeLoading = ref(false)
 
@@ -139,6 +168,123 @@ const isOnDetailPage = computed(() => activeAssetId.value !== null)
  * docblock.
  */
 let requestId = 0
+
+/**
+ * Pull the folders of every visible principal.
+ *
+ * The folders API is principal-scoped, so the panel asks once per
+ * principal and keeps the answers apart: the tree then shows the
+ * folders of the principals in scope, and a folder of a principal
+ * outside the scope is never offered (the server would answer such a
+ * filter with no rows at all).
+ *
+ * Best-effort, like the group labels: a principal whose folders cannot
+ * be read contributes an empty tree rather than an error. The one
+ * answer that is not best-effort is the 404 — it says the core has no
+ * folders endpoint at all, and the panel stops offering the filters
+ * such a core ignores.
+ */
+async function bootstrapFolders(): Promise<void> {
+    const principals = visiblePrincipals.value
+    const responses = await Promise.all(
+        principals.map(async (principal) => {
+            try {
+                const response = await api.value.get<{ folders: MediaFolder[] }>(
+                    `/media/folders?principal_id=${principal.id}`,
+                )
+                return [principal.id, response.folders ?? []] as const
+            } catch (e) {
+                if (isNotFound(e)) {
+                    foldersSupported.value = false
+                }
+                return [principal.id, [] as MediaFolder[]] as const
+            }
+        }),
+    )
+    const next: Record<number, MediaFolder[]> = {}
+    for (const [principalId, list] of responses) {
+        next[principalId] = list
+    }
+    foldersByPrincipal.value = next
+    if (principals.length === 0) {
+        // Nothing to list, but the endpoint's existence is still the
+        // capability probe.
+        await probeFoldersSupport()
+    }
+}
+
+/**
+ * Ask the folders endpoint once, without naming a principal, to learn
+ * whether the core has it.
+ *
+ * Only used when the caller has no visible principal: with none, the
+ * per-principal requests never fire, and without a probe the panel
+ * would offer a kind filter against a core that ignores it.
+ */
+async function probeFoldersSupport(): Promise<void> {
+    try {
+        await api.value.get('/media/folders')
+    } catch (e) {
+        if (isNotFound(e)) {
+            foldersSupported.value = false
+        }
+    }
+}
+
+/**
+ * Whether a failed request answered 404.
+ *
+ * The host's client throws an `ApiError` carrying the HTTP status; the
+ * plugin's shim types a rejection as `unknown`, so the status is read
+ * by shape.
+ */
+function isNotFound(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) {
+        return false
+    }
+    return (error as { status?: unknown }).status === 404
+}
+
+/**
+ * The folders of the principals in scope, as one flat list.
+ *
+ * The tree is built from `parent_id` on the client, so the list may
+ * hold the folders of several principals: a folder's parent always
+ * belongs to the same principal, and the paths of two principals can
+ * collide without colliding the tree (the ids differ).
+ *
+ * `path` is unique per principal and not globally, so two principals may
+ * own a folder with the same name — the principal travels with the
+ * folder, because the tree has to say whose assets a folder filter
+ * would return.
+ */
+const scopedFolders = computed<ScopedMediaFolder[]>(() => {
+    const ids = selectedScope.value !== null
+        ? [selectedScope.value]
+        : visiblePrincipals.value.map((principal) => principal.id)
+    const out: ScopedMediaFolder[] = []
+    for (const id of ids) {
+        for (const folder of foldersByPrincipal.value[id] ?? []) {
+            out.push({ ...folder, principal_id: id })
+        }
+    }
+    return out
+})
+
+/**
+ * The folders of every visible principal.
+ *
+ * The badge on a card and the folder line on the detail page resolve
+ * the asset's `folder_id` against this list — the asset may have been
+ * reached directly, so its principal need not be the one in scope.
+ */
+const allFolders = computed<MediaFolder[]>(() => {
+    const out: MediaFolder[] = []
+    for (const list of Object.values(foldersByPrincipal.value)) {
+        out.push(...list)
+    }
+    return out
+})
 
 /**
  * Translate the single-pick `selectedScope` into the repeated-key wire
@@ -214,8 +360,19 @@ function buildPageParams(page: number): URLSearchParams {
     // non-temp rows, and operators who flip it ON see temp rows too.
     params.set('include_temporary', showTemporary.value ? 'true' : 'false')
     if (query.value.mediaType) params.set('type', query.value.mediaType)
-    if (query.value.pluginSlug) params.set('plugin', query.value.pluginSlug)
-    if (query.value.search) params.set('search', query.value.search)
+    // The canonical spellings, which every core reads. The panel used
+    // to send `?plugin=` and `?search=`, and core read `?plugin_slug=`
+    // and `?q=` — so the plugin filter and the search box did
+    // nothing. Core now answers to both spellings so the *released*
+    // panel keeps working; this panel sends the canonical ones so it
+    // works against every core, old and new.
+    if (query.value.pluginSlug) params.set('plugin_slug', query.value.pluginSlug)
+    if (query.value.search) params.set('q', query.value.search)
+    // The scalar form, deliberately: the server accepts one folder, and
+    // a bracket form would be read as "the first of these", which is
+    // worse than no folder filter at all.
+    if (query.value.folderId) params.set('folder_id', query.value.folderId)
+    if (query.value.kind) params.set('kind', query.value.kind)
     for (const id of principalIdsForRequest()) {
         // Use the `principal_id[]` array form so PHP's `parse_str`
         // (which Symfony uses internally) preserves every value.
@@ -321,7 +478,45 @@ function setSearch(search: string): void {
 
 function setScope(next: SelectedScope): void {
     selectedScope.value = next
-    query.value = { ...query.value, page: 1 }
+    query.value = { ...query.value, folderId: folderIdInScope(next, query.value.folderId ?? null), page: 1 }
+    void load()
+}
+
+/**
+ * The folder selection that survives a scope change.
+ *
+ * The scope chip row picks the principals whose assets are listed, and
+ * the folder tree offers the folders of exactly those principals — a
+ * folder of a principal outside the scope would filter the listing down
+ * to nothing, so the server refuses it and the panel does not offer it.
+ */
+function folderIdInScope(scope: SelectedScope, keep: string | null): string | null {
+    if (keep === null) {
+        return null
+    }
+    const ids = scope !== null ? [scope] : visiblePrincipals.value.map((p) => p.id)
+    for (const id of ids) {
+        if ((foldersByPrincipal.value[id] ?? []).some((folder) => folder.id === keep)) {
+            return keep
+        }
+    }
+    return null
+}
+
+/**
+ * The folder filter.
+ *
+ * A folder of a principal outside the new scope would filter the
+ * listing down to nothing, so the selection is dropped when the scope
+ * changes.
+ */
+function setFolder(folderId: string | null): void {
+    query.value = { ...query.value, folderId, page: 1 }
+    void load()
+}
+
+function setKind(kind: MediaAssetKind | ''): void {
+    query.value = { ...query.value, kind, page: 1 }
     void load()
 }
 
@@ -389,6 +584,10 @@ onMounted(async () => {
     // emit a request without the filter on the very first paint
     // (bootstrapScope's `visiblePrincipalIds` would still be empty).
     await bootstrapScope()
+    // The folders of the visible principals, for the tree and the
+    // folder picker. Best-effort: a failure leaves the tree empty
+    // rather than blocking the listing.
+    await bootstrapFolders()
     if (!isOnDetailPage.value) {
         void load()
     }
@@ -431,6 +630,7 @@ onBeforeUnmount(() => {
             v-if="isOnDetailPage && activeAssetId !== null"
             :asset-id="activeAssetId"
             :host-context="hostContext"
+            :folders="allFolders"
             @updated="onAssetUpdated"
             @deleted="onAssetDeleted"
         />
@@ -460,9 +660,15 @@ onBeforeUnmount(() => {
                 :principals="visiblePrincipals"
                 :selected-scope="selectedScope"
                 :group-labels="groupLabelsByPrincipalId"
+                :folders="scopedFolders"
+                :selected-folder-id="query.folderId ?? null"
+                :kind="query.kind ?? ''"
+                :folders-supported="foldersSupported"
                 @update:type="setType"
                 @update:search="setSearch"
                 @update:scope="setScope"
+                @update:folder-id="setFolder"
+                @update:kind="setKind"
             />
 
             <div v-if="loading" class="text-sm text-muted-foreground">{{ t('Loading media…') }}</div>
@@ -470,7 +676,7 @@ onBeforeUnmount(() => {
                 {{ t('Failed to load media: {error}', { error }) }}
             </div>
             <template v-else>
-                <MediaGrid :assets="assets" @select="select" @upload-click="openUploadDialog" />
+                <MediaGrid :assets="assets" :folders="allFolders" @select="select" @upload-click="openUploadDialog" />
                 <div
                     v-if="assets.length > 0 && (canLoadMore || loadingMore || appendError)"
                     class="flex flex-col items-center gap-2 pt-2"
@@ -508,6 +714,7 @@ onBeforeUnmount(() => {
                 :principals="visiblePrincipals"
                 :group-labels="groupLabelsByPrincipalId"
                 :default-principal-id="selectedScope"
+                :folders-by-principal="foldersByPrincipal"
                 @uploaded="onUploaded"
                 @close="uploadDialogOpen = false"
             />

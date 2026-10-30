@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import MediaUploadDialog from '../../src/components/MediaUploadDialog.vue'
-import type { MediaAsset, MediaPrincipal } from '../../src/types'
+import type { MediaAsset, MediaFolder, MediaPrincipal } from '../../src/types'
 import type { PluginHostContext } from '../../src/shims'
 
 const principals: MediaPrincipal[] = [
@@ -52,6 +52,21 @@ interface DialogProps {
     principals: MediaPrincipal[]
     groupLabels: Record<number, string>
     defaultPrincipalId: number | null
+    foldersByPrincipal: Record<number, MediaFolder[]>
+}
+
+/**
+ * The folders of each principal, mirroring what the server answers
+ * per principal.
+ */
+const foldersByPrincipal: Record<number, MediaFolder[]> = {
+    101: [
+        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 1 },
+    ],
+    202: [
+        { id: 'folder-3', name: 'Brand', path: '/Brand', parent_id: null, asset_count: 4 },
+    ],
 }
 
 function buildHost(overrides?: {
@@ -95,6 +110,7 @@ function dialogProps(harness: Harness, defaultPrincipalId: number | null): Dialo
         principals,
         groupLabels,
         defaultPrincipalId,
+        foldersByPrincipal,
     }
 }
 
@@ -128,6 +144,10 @@ function fileInput(): HTMLInputElement {
 
 function principalSelect(): HTMLSelectElement {
     return document.querySelector('[data-testid="upload-principal-select"]') as HTMLSelectElement
+}
+
+function folderSelect(): HTMLSelectElement {
+    return document.querySelector('[data-testid="upload-folder-select"]') as HTMLSelectElement
 }
 
 function uploadDialog(): HTMLDialogElement {
@@ -359,6 +379,83 @@ describe('MediaUploadDialog', () => {
         await flushPromises()
         expect(dialog.open).toBe(false)
         expect(wrapper.emitted('close')).toBeDefined()
+        wrapper.unmount()
+    })
+
+    it('offers the folders of the selected principal', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const options = Array.from(folderSelect().options)
+        // The unfiled option plus the folders of principal 101.
+        expect(options).toHaveLength(3)
+        expect(options[1]?.text).toBe('Corporate')
+        expect(options[2]?.text).toBe('2026')
+        wrapper.unmount()
+    })
+
+    it('sends the picked folder with the upload', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        folderSelect().value = 'folder-1'
+        folderSelect().dispatchEvent(new Event('change', { bubbles: true }))
+        await flushPromises()
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBe('folder-1')
+        wrapper.unmount()
+    })
+
+    it('sends no folder when the unfiled option is picked', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBeNull()
+        wrapper.unmount()
+    })
+
+    it('drops the folder when the principal changes', async () => {
+        // The folder belongs to a principal; the server refuses a
+        // folder of another one.
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        folderSelect().value = 'folder-1'
+        folderSelect().dispatchEvent(new Event('change', { bubbles: true }))
+        await flushPromises()
+        principalSelect().value = '202'
+        principalSelect().dispatchEvent(new Event('change', { bubbles: true }))
+        await flushPromises()
+        expect(folderSelect().value).toBe('')
         wrapper.unmount()
     })
 })
