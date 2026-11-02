@@ -46,7 +46,6 @@ const { t } = useI18n()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const folderId = ref<string | null>(null)
 const busy = ref(false)
-const error = ref<string | null>(null)
 
 /**
  * The principals the selection holds assets of, with the number of
@@ -94,22 +93,23 @@ const folders = computed<MediaFolder[]>(() =>
 async function submit(): Promise<void> {
     if (busy.value) return
     busy.value = true
-    error.value = null
     const moved: MediaAsset[] = []
     let failed = 0
     try {
-        for (const asset of fileable.value) {
-            try {
-                const updated = await props.hostContext.api.patch<MediaAsset>(`/media/${asset.id}`, {
-                    folder_id: folderId.value,
-                })
-                if (updated) {
-                    moved.push(updated)
-                }
-            } catch {
-                // The server refuses a filename that is taken in the
-                // target folder, and a folder of another principal. The
-                // other assets are filed regardless.
+        // Every asset is filed on its own: the server scopes a folder
+        // write by the asset's principal and refuses a filename that is
+        // taken in the target folder. One refusal must not hold up the
+        // rest, so they are settled together and counted afterwards.
+        const results = await Promise.allSettled(
+            fileable.value.map((asset) => props.hostContext.api.patch<MediaAsset>(
+                `/media/${asset.id}`,
+                { folder_id: folderId.value },
+            )),
+        )
+        for (const result of results) {
+            if (result.status === 'fulfilled' && result.value) {
+                moved.push(result.value)
+            } else {
                 failed++
             }
         }
@@ -198,14 +198,6 @@ onBeforeUnmount(() => {
                         data-testid="media-move-skipped"
                     >
                         {{ t('{count} selected asset belongs to another principal and stays where it is. | {count} selected assets belong to another principal and stay where they are.', { count: skipped }) }}
-                    </p>
-
-                    <p
-                        v-if="error !== null"
-                        class="rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
-                        data-testid="media-move-error"
-                    >
-                        {{ error }}
                     </p>
                 </div>
 

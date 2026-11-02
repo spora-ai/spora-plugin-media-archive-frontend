@@ -802,18 +802,28 @@ async function confirmBulkDelete(): Promise<void> {
         return
     }
     bulkBusy.value = true
+    // Every asset is deleted on its own: the server's delete is a
+    // single-asset endpoint, and a batch endpoint would have to say
+    // what it does when one of the assets is not the caller's to
+    // delete. A refusal counts that one asset and leaves the rest
+    // alone, so they are settled together and counted afterwards.
+    const results = await Promise.allSettled(
+        targets.map((asset) => api.value.delete(`/media/${asset.id}`)),
+    )
+    bulkBusy.value = false
+    deleteDialogOpen.value = false
     const deleted: MediaAsset[] = []
     let failed = 0
-    for (const asset of targets) {
-        try {
-            await api.value.delete(`/media/${asset.id}`)
-            deleted.push(asset)
-        } catch {
+    for (const [index, result] of results.entries()) {
+        if (result.status === 'fulfilled') {
+            const asset = targets[index]
+            if (asset !== undefined) {
+                deleted.push(asset)
+            }
+        } else {
             failed++
         }
     }
-    bulkBusy.value = false
-    deleteDialogOpen.value = false
     for (const asset of deleted) {
         adjustFolderCounts(asset.folder_id ?? null, null)
     }

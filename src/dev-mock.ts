@@ -258,23 +258,40 @@ export function parseListQuery(path: string): ListQuery {
     }
 }
 
+/**
+ * Whether an asset passes the query's filters.
+ *
+ * The conditions are one per filter, each returning early: a long
+ * chain of `if`s in one function reads as one condition, and the
+ * filters are independent of each other.
+ */
+function matchesQuery(asset: MediaAsset, query: ListQuery, currentUserId: number): boolean {
+    if (query.scope === 'mine' && !isOwnedByUser(asset, currentUserId)) return false
+    if (!matchesColumnFilters(asset, query)) return false
+    if (query.search !== '' && !matchesSearch(asset, query.search)) return false
+    return true
+}
+
+function isOwnedByUser(asset: MediaAsset, currentUserId: number): boolean {
+    const ownerId = (asset as MediaAsset & { user_id?: number | null }).user_id
+    return ownerId === currentUserId
+}
+
+function matchesColumnFilters(asset: MediaAsset, query: ListQuery): boolean {
+    if (query.type !== '' && asset.media_type !== query.type) return false
+    if (query.plugin !== '' && asset.plugin_slug !== query.plugin) return false
+    if (query.folderId !== '' && asset.folder_id !== query.folderId) return false
+    if (query.unfiled && asset.folder_id !== null && asset.folder_id !== undefined) return false
+    if (query.kind !== '' && (asset.kind ?? 'asset') !== query.kind) return false
+    return true
+}
+
+function matchesSearch(asset: MediaAsset, search: string): boolean {
+    return (asset.prompt ?? '').toLowerCase().includes(search)
+}
+
 export function filterFixture(query: ListQuery, source: MediaAsset[] = FIXTURE as MediaAsset[], currentUserId: number = CURRENT_USER_ID): MediaAsset[] {
-    return source.filter((asset) => {
-        if (query.scope === 'mine') {
-            const ownerId = (asset as MediaAsset & { user_id?: number | null }).user_id
-            if (ownerId !== currentUserId) return false
-        }
-        if (query.type && asset.media_type !== query.type) return false
-        if (query.plugin && asset.plugin_slug !== query.plugin) return false
-        if (query.folderId && asset.folder_id !== query.folderId) return false
-        if (query.unfiled && asset.folder_id !== null && asset.folder_id !== undefined) return false
-        if (query.kind && (asset.kind ?? 'asset') !== query.kind) return false
-        if (query.search) {
-            const haystack = (asset.prompt ?? '').toLowerCase()
-            if (!haystack.includes(query.search)) return false
-        }
-        return true
-    })
+    return source.filter((asset) => matchesQuery(asset, query, currentUserId))
 }
 
 export function paginate<T>(items: T[], page: number, perPage: number): T[] {
@@ -402,12 +419,12 @@ export function createMockApi(): PluginHostContext['api'] {
             // sandbox does too.
             return Promise.resolve({ ...found } as unknown as T)
         },
-        delete: async <T>(path: string): Promise<T> => {
+        delete: <T>(path: string): Promise<T> => {
             const id = path.slice('/media/'.length).split('?')[0]
             const index = assets.findIndex((asset) => asset.id === id)
-            if (index < 0) throw new Error(`Not found: ${id}`)
+            if (index < 0) return Promise.reject(new Error(`Not found: ${id}`))
             const [removed] = assets.splice(index, 1)
-            return { deleted: true, id: removed?.id } as unknown as T
+            return Promise.resolve({ deleted: true, id: removed?.id } as unknown as T)
         },
     }
 }
