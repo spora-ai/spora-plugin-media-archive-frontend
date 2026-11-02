@@ -15,7 +15,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileAudio, FileVideo, FileText, Image, Search, Upload } from 'lucide-vue-next'
+import { FileAudio, FileVideo, FileText, Image, Search } from 'lucide-vue-next'
 import type { PluginHostContext } from './shims'
 import type {
     MediaAsset,
@@ -31,7 +31,9 @@ import type {
 import { extractAssetId } from './lib/route-detection'
 import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
 import MediaGrid from './components/MediaGrid.vue'
-import MediaFilters from './components/MediaFilters.vue'
+import MediaFolderRail from './components/MediaFolderRail.vue'
+import MediaNewFolderDialog from './components/MediaNewFolderDialog.vue'
+import MediaToolbar from './components/MediaToolbar.vue'
 import MediaUploadDialog from './components/MediaUploadDialog.vue'
 import MediaDetailPage from './pages/MediaDetailPage.vue'
 
@@ -133,7 +135,7 @@ const lastPage = ref(1)
 const loadingMore = ref(false)
 
 /**
- * Include-temporary-files toggle. `MediaFilters` owns the UI surface
+ * Include-temporary-files toggle. `MediaToolbar` owns the UI surface
  * that mutates the ref; this component owns the wire-side effect
  * (sending the query param and reloading the grid on flip).
  */
@@ -156,6 +158,19 @@ const appendError = ref<string | null>(null)
  * selection — the dialog owns its own state from open-to-close.
  */
 const uploadDialogOpen = ref(false)
+
+/**
+ * The folder rail is a drawer on a narrow screen: 256px is most of a
+ * phone's width. Below `lg` it slides in over the panel and is closed by
+ * the backdrop, the close button, Escape, or picking a folder.
+ */
+const railOpen = ref(false)
+
+/**
+ * The "new folder" dialog. It opens on the principal and the parent the
+ * operator was looking at, so a folder lands where they were working.
+ */
+const newFolderOpen = ref(false)
 
 const activeAssetId = computed(() => extractAssetId(routePath.value))
 const isOnDetailPage = computed(() => activeAssetId.value !== null)
@@ -284,6 +299,25 @@ const allFolders = computed<MediaFolder[]>(() => {
         out.push(...list)
     }
     return out
+})
+
+/**
+ * The name of the folder the listing is scoped to, or `null` for the
+ * whole library. The grid's empty state says which of the two it is:
+ * "no media yet" is wrong for an empty folder in a full archive.
+ */
+const selectedFolderName = computed<string | null>(() => {
+    const id = query.value.folderId
+    if (id === null || id === undefined || id === '') {
+        return null
+    }
+    for (const list of Object.values(foldersByPrincipal.value)) {
+        const found = list.find((folder) => folder.id === id)
+        if (found !== undefined) {
+            return found.name
+        }
+    }
+    return null
 })
 
 /**
@@ -515,6 +549,29 @@ function setFolder(folderId: string | null): void {
     void load()
 }
 
+/**
+ * Picking a folder in the rail closes the drawer on a narrow screen, so
+ * the operator sees the result of the pick rather than the tree.
+ */
+function onFolderPicked(folderId: string | null): void {
+    setFolder(folderId)
+    railOpen.value = false
+}
+
+/**
+ * A folder was created: it joins its principal's list and becomes the
+ * selected folder.
+ *
+ * The list is kept ordered by path — the server's own order — so the
+ * tree does not jump when the new folder arrives.
+ */
+function onFolderCreated(payload: { folder: MediaFolder; principalId: number }): void {
+    const list = foldersByPrincipal.value[payload.principalId] ?? []
+    const next = [...list, payload.folder].sort((a, b) => a.path.localeCompare(b.path))
+    foldersByPrincipal.value = { ...foldersByPrincipal.value, [payload.principalId]: next }
+    setFolder(payload.folder.id)
+}
+
 function setKind(kind: MediaAssetKind | ''): void {
     query.value = { ...query.value, kind, page: 1 }
     void load()
@@ -578,7 +635,23 @@ async function onUploaded(_asset: MediaAsset): Promise<void> {
 
 let unregisterAfterEach: (() => void) | null = null
 
+/**
+ * Escape closes the folder drawer — but only once the menus inside it are
+ * closed. The menu is the closer layer, and a drawer with an open menu in
+ * it should not lose both at once.
+ *
+ * The menus register their own Escape handler, but they are mounted after
+ * this one, so this handler runs first; the open menu is therefore looked
+ * for rather than waited for.
+ */
+function onDrawerEscape(event: KeyboardEvent): void {
+    if (event.key !== 'Escape' || !railOpen.value) return
+    if (document.querySelector('[data-media-menu]') !== null) return
+    railOpen.value = false
+}
+
 onMounted(async () => {
+    document.addEventListener('keydown', onDrawerEscape)
     // Await the scope bootstrap so the initial load() call carries
     // the correct `principal_id` set — racing the two would silently
     // emit a request without the filter on the very first paint
@@ -618,6 +691,7 @@ watch(showTemporary, () => {
 })
 
 onBeforeUnmount(() => {
+    document.removeEventListener('keydown', onDrawerEscape)
     unregisterAfterEach?.()
     // Bumping the id invalidates any pending response.
     requestId++
@@ -636,77 +710,126 @@ onBeforeUnmount(() => {
         />
         <div v-else class="flex flex-col gap-6 text-foreground" data-testid="media-archive-grid-view">
             <header class="flex flex-col gap-2">
-                <div class="flex items-center justify-between gap-2">
-                    <h2 class="text-lg font-semibold">Media Archive</h2>
-                    <button
-                        type="button"
-                        :disabled="visiblePrincipals.length === 0"
-                        class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                        data-testid="media-archive-upload-button"
-                        @click="openUploadDialog"
-                    >
-                        <Upload class="h-3.5 w-3.5" />
-                        {{ t('Upload') }}
-                    </button>
-                </div>
+                <h2 class="text-lg font-semibold">Media Archive</h2>
                 <p class="text-sm text-muted-foreground">
                     {{ t('{count} asset | {count} assets in your archive.', { count: total }) }}
                 </p>
             </header>
 
-            <MediaFilters
-                :type="query.mediaType ?? ''"
-                :search="query.search ?? ''"
-                :principals="visiblePrincipals"
-                :selected-scope="selectedScope"
-                :group-labels="groupLabelsByPrincipalId"
-                :folders="scopedFolders"
-                :selected-folder-id="query.folderId ?? null"
-                :kind="query.kind ?? ''"
-                :folders-supported="foldersSupported"
-                @update:type="setType"
-                @update:search="setSearch"
-                @update:scope="setScope"
-                @update:folder-id="setFolder"
-                @update:kind="setKind"
-            />
-
-            <div v-if="loading" class="text-sm text-muted-foreground">{{ t('Loading media…') }}</div>
-            <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                {{ t('Failed to load media: {error}', { error }) }}
-            </div>
-            <template v-else>
-                <MediaGrid :assets="assets" :folders="allFolders" @select="select" @upload-click="openUploadDialog" />
+            <div class="flex flex-col gap-6 lg:flex-row lg:gap-0">
+                <!--
+                  The rail's backdrop. It exists only while the drawer is
+                  open, and only on a narrow screen — on a wide screen the
+                  rail is a column beside the grid, not a layer over it.
+                -->
                 <div
-                    v-if="assets.length > 0 && (canLoadMore || loadingMore || appendError)"
-                    class="flex flex-col items-center gap-2 pt-2"
-                    data-testid="media-load-more"
+                    v-if="railOpen"
+                    class="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+                    data-testid="media-rail-backdrop"
+                    @click="railOpen = false"
+                />
+
+                <!--
+                  The rail. On a narrow screen it is a drawer: off-canvas
+                  to the left, opened from the toolbar. On a wide screen it
+                  is a column, and the divider between it and the grid is
+                  its own right border — the grid keeps its distance from
+                  it with `lg:pl-6`.
+                -->
+                <aside
+                    v-if="foldersSupported"
+                    class="fixed inset-y-0 left-0 z-50 w-72 overflow-y-auto border-r border-border bg-background p-4 transition-transform lg:static lg:z-auto lg:w-64 lg:shrink-0 lg:overflow-visible lg:border-r-0 lg:bg-transparent lg:p-0 lg:pr-6"
+                    :class="railOpen
+                        ? 'translate-x-0 visible'
+                        : '-translate-x-full invisible lg:translate-x-0 lg:visible'"
+                    data-testid="media-folder-rail"
                 >
-                    <button
-                        type="button"
-                        :disabled="!canLoadMore"
-                        class="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                        data-testid="media-load-more-button"
-                        @click="loadMore"
-                    >
-                        <span
-                            v-if="loadingMore"
-                            class="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
+                    <MediaFolderRail
+                        :principals="visiblePrincipals"
+                        :selected-scope="selectedScope"
+                        :group-labels="groupLabelsByPrincipalId"
+                        :folders="scopedFolders"
+                        :selected-folder-id="query.folderId ?? null"
+                        @update:scope="setScope"
+                        @update:folder-id="onFolderPicked"
+                        @new-folder="newFolderOpen = true"
+                        @close="railOpen = false"
+                    />
+                </aside>
+
+                <main class="flex min-w-0 flex-1 flex-col gap-4 lg:pl-6">
+                    <MediaToolbar
+                        :type="query.mediaType ?? ''"
+                        :search="query.search ?? ''"
+                        :kind="query.kind ?? ''"
+                        :folders-supported="foldersSupported"
+                        :show-rail="foldersSupported"
+                        :principals="visiblePrincipals"
+                        :selected-scope="selectedScope"
+                        :group-labels="groupLabelsByPrincipalId"
+                        @update:type="setType"
+                        @update:search="setSearch"
+                        @update:kind="setKind"
+                        @update:scope="setScope"
+                        @upload-click="openUploadDialog"
+                        @open-folders="railOpen = true"
+                    />
+
+                    <div v-if="loading" class="text-sm text-muted-foreground">{{ t('Loading media…') }}</div>
+                    <div v-else-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                        {{ t('Failed to load media: {error}', { error }) }}
+                    </div>
+                    <template v-else>
+                        <MediaGrid
+                            :assets="assets"
+                            :folders="allFolders"
+                            :folder-name="selectedFolderName"
+                            @select="select"
+                            @upload-click="openUploadDialog"
                         />
-                        {{ loadingMore ? t('Loading…') : t('Load more') }}
-                    </button>
-                    <p class="text-xs text-muted-foreground" data-testid="media-load-more-meta">
-                        {{ t('Showing {shown} of {total}', { shown: assets.length, total }) }}
-                    </p>
-                    <p
-                        v-if="appendError"
-                        class="text-xs text-destructive"
-                        data-testid="media-load-more-error"
-                    >
-                        {{ t("Couldn't load more: {error}", { error: appendError }) }}
-                    </p>
-                </div>
-            </template>
+                        <div
+                            v-if="assets.length > 0 && (canLoadMore || loadingMore || appendError)"
+                            class="flex flex-col items-center gap-2 pt-2"
+                            data-testid="media-load-more"
+                        >
+                            <button
+                                type="button"
+                                :disabled="!canLoadMore"
+                                class="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                data-testid="media-load-more-button"
+                                @click="loadMore"
+                            >
+                                <span
+                                    v-if="loadingMore"
+                                    class="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
+                                />
+                                {{ loadingMore ? t('Loading…') : t('Load more') }}
+                            </button>
+                            <p class="text-xs text-muted-foreground" data-testid="media-load-more-meta">
+                                {{ t('Showing {shown} of {total}', { shown: assets.length, total }) }}
+                            </p>
+                            <p
+                                v-if="appendError"
+                                class="text-xs text-destructive"
+                                data-testid="media-load-more-error"
+                            >
+                                {{ t("Couldn't load more: {error}", { error: appendError }) }}
+                            </p>
+                        </div>
+                    </template>
+                </main>
+            </div>
+
+            <MediaNewFolderDialog
+                v-if="newFolderOpen"
+                :host-context="hostContext"
+                :principals="visiblePrincipals"
+                :folders-by-principal="foldersByPrincipal"
+                :default-principal-id="selectedScope"
+                :default-parent-id="query.folderId ?? null"
+                @created="onFolderCreated"
+                @close="newFolderOpen = false"
+            />
 
             <MediaUploadDialog
                 v-if="uploadDialogOpen"
@@ -725,7 +848,6 @@ onBeforeUnmount(() => {
                 <FileVideo class="h-4 w-4" />
                 <FileText class="h-4 w-4" />
                 <Search class="h-4 w-4" />
-                <Upload class="h-4 w-4" />
             </div>
         </div>
     </div>

@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { ref } from 'vue'
 import App from '../src/App.vue'
-import MediaFilters from '../src/components/MediaFilters.vue'
 import type {
     MediaAsset,
     MediaFolder,
@@ -186,6 +185,51 @@ function buildContext(
     }
 }
 
+/**
+ * The scope dropdown of the folder rail.
+ *
+ * The toolbar carries a compact copy of the same control for the narrow
+ * screen, so the rail's is picked explicitly — otherwise the first
+ * match in the document could be either of the two.
+ */
+function railScopeToggle(wrapper: VueWrapper) {
+    return wrapper.find('[data-testid="media-folder-rail"] [data-testid="media-scope-toggle"]')
+}
+
+/**
+ * Pick a principal in the rail's scope dropdown.
+ *
+ * Picking a row does not close the menu — the parent owns the selection
+ * and re-renders — so the menu is only opened when it is closed.
+ */
+async function pickScope(wrapper: VueWrapper, principalId: number | null): Promise<void> {
+    if (!wrapper.find('[data-testid="media-folder-rail"] [data-testid="media-scope-menu"]').exists()) {
+        await railScopeToggle(wrapper).trigger('click')
+    }
+    const option = principalId === null ? 'all' : String(principalId)
+    await wrapper.find(`[data-testid="media-scope-option-${option}"]`).trigger('click')
+}
+
+/**
+ * Pick a file type in the toolbar's type dropdown.
+ */
+async function pickType(wrapper: VueWrapper, type: string): Promise<void> {
+    if (!wrapper.find('[data-testid="media-type-select-menu"]').exists()) {
+        await wrapper.find('[data-testid="media-type-select-toggle"]').trigger('click')
+    }
+    await wrapper.find(`[data-testid="media-type-select-option-${type}"]`).trigger('click')
+}
+
+/**
+ * Pick a mark in the toolbar's kind dropdown.
+ */
+async function pickKind(wrapper: VueWrapper, kind: string): Promise<void> {
+    if (!wrapper.find('[data-testid="media-kind-select-menu"]').exists()) {
+        await wrapper.find('[data-testid="media-kind-select-toggle"]').trigger('click')
+    }
+    await wrapper.find(`[data-testid="media-kind-select-option-${kind}"]`).trigger('click')
+}
+
 describe('App.vue', () => {
     beforeEach(() => {
         vi.useFakeTimers()
@@ -249,61 +293,58 @@ describe('App.vue', () => {
         expect(wrapper.text()).toContain('10 assets')
     })
 
-    it('renders scope chips from /principals/me + /groups', async () => {
+    it('lists the visible principals in the scope dropdown', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
         const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        // Scope to the actual chip selector — `media-scope-chips` is the
-        // container div, not a chip, and would otherwise inflate the count.
-        const chips = wrapper.findAll('[data-testid^="media-scope-"]:not([data-testid="media-scope-chips"])')
-        // Default fixtures: ALL, My Media (user principal 101), Group A
-        // (group principal 202 = "Marketing Team").
-        expect(chips).toHaveLength(3)
-        expect(wrapper.find('[data-testid="media-scope-all"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="media-scope-101"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="media-scope-202"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="media-scope-202"]').text()).toContain('Marketing Team')
+        // Default fixtures: My Media (user principal 101), Group A
+        // (group principal 202 = "Marketing Team"), plus the ALL row.
+        await railScopeToggle(wrapper).trigger('click')
+        expect(wrapper.find('[data-testid="media-scope-option-all"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-scope-option-101"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-scope-option-202"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-scope-option-202"]').text()).toContain('Marketing Team')
     })
 
-    it('labels the user-principal chip as "My Media", never as "Group #N"', () => {
+    it('labels the user-principal "My Media", never as "Group #N"', async () => {
         // Regression for the bug where the user-principal was rendered
         // with the `Group #${id}` fallback label because the frontend
-        // lost the `type` discriminator before MediaFilters could read
-        // it. The dashboard's own `My Agents` chip never had this bug
-        // — we should match its visual contract.
-        const wrapper = mount(MediaFilters, {
-            props: {
-                type: '',
-                search: '',
-                principals: [
-                    { id: 1, type: 'user', user_id: 1, group_id: null },
-                    { id: 5, type: 'group', user_id: null, group_id: 4 },
-                ],
-                selectedScope: null,
-                groupLabels: {},
-            },
-        })
-        // The user-principal chip is data-testid="media-scope-1" but
-        // its label must say "My Media" regardless of the id number.
-        expect(wrapper.find('[data-testid="media-scope-1"]').text()).toContain('My Media')
-        expect(wrapper.find('[data-testid="media-scope-1"]').text()).not.toContain('Group #1')
-        // The group-principal chip falls back to `Group #5` because no
-        // /groups entry keyed principal_id=5 was provided.
-        expect(wrapper.find('[data-testid="media-scope-5"]').text()).toContain('Group #5')
+        // lost the `type` discriminator before the scope select could
+        // read it. The dashboard's own `My Agents` chip never had this
+        // bug — we should match its visual contract.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await railScopeToggle(wrapper).trigger('click')
+        // The user-principal row is data-testid="media-scope-option-101"
+        // but its label must say "My Media" regardless of the id number.
+        expect(wrapper.find('[data-testid="media-scope-option-101"]').text()).toContain('My Media')
+        expect(wrapper.find('[data-testid="media-scope-option-101"]').text()).not.toContain('Group #101')
+        // The group-principal falls back to `Group #202` because no
+        // /groups entry keyed principal_id=202 was provided.
+        const helper2 = buildContext(vi.fn().mockResolvedValue(emptyList), undefined, { groups: [] })
+        const wrapper2 = mount(App, { props: { hostContext: helper2 } })
+        await flushPromises()
+        await flushPromises()
+        await railScopeToggle(wrapper2).trigger('click')
+        expect(wrapper2.find('[data-testid="media-scope-option-202"]').text()).toContain('Group #202')
     })
 
-    it('omits the scope chip row when the user has no visible principals', async () => {
-        // A brand-new user with no groups: the chip row should hide
-        // entirely so the user isn't staring at an empty `ALL` button.
-        // The grid still works (the API falls back to the legacy
-        // ownership union).
+    it('lists no principal when the user has no visible principals', async () => {
+        // A brand-new user with no groups: the scope dropdown has
+        // nothing to pick. The grid still works (the API falls back to
+        // the legacy ownership union).
         const get = vi.fn().mockResolvedValue(emptyList)
         const helper = buildContext(get, undefined, { principals: [], groups: [] })
         const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        expect(wrapper.find('[data-testid="media-scope-chips"]').exists()).toBe(false)
+        await railScopeToggle(wrapper).trigger('click')
+        expect(wrapper.find('[data-testid="media-scope-option-all"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-scope-option-101"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-scope-option-202"]').exists()).toBe(false)
     })
 
     it('sends every visible principal_id when scope is ALL (default)', async () => {
@@ -324,31 +365,31 @@ describe('App.vue', () => {
         expect(url).toContain('principal_id%5B%5D=202')
     })
 
-    it('sends a single principal_id when a group chip is clicked', async () => {
+    it('sends a single principal_id when a principal is picked', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
         const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await pickScope(wrapper, 202)
         await flushPromises()
         await flushPromises()
         const last = get.mock.calls.at(-1)?.[0] ?? ''
         expect(last).toContain('principal_id%5B%5D=202')
-        // The user-principal must NOT be sent alongside the group chip
+        // The user-principal must NOT be sent alongside the picked group
         // — picking a specific group means "only this group", and the
         // server's `includeUploads` branch would otherwise leak the
         // user's own uploads into the per-group view.
         expect(last).not.toContain('principal_id%5B%5D=101')
     })
 
-    it('resets scope to ALL when the active chip is clicked again', async () => {
+    it('sends every visible principal_id again when ALL is picked', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
         const helper = buildContext(get); const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await pickScope(wrapper, 202)
         await flushPromises()
-        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await pickScope(wrapper, null)
         await flushPromises()
         await flushPromises()
         const last = get.mock.calls.at(-1)?.[0] ?? ''
@@ -373,7 +414,7 @@ describe('App.vue', () => {
         // Allow the initial (slow) call to settle as pending.
         await flushPromises()
         // Trigger a filter change — this should swap to the fast call.
-        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+        await pickType(wrapper, 'image')
         await flushPromises()
         await flushPromises()
         // Now resolve the stale (initial) request — its handler must bail
@@ -418,7 +459,7 @@ describe('App.vue', () => {
         await flushPromises()
         await flushPromises()
         expect(get).toHaveBeenCalledTimes(1)
-        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+        await pickType(wrapper, 'image')
         await flushPromises()
         await flushPromises()
         expect(get).toHaveBeenCalledTimes(2)
@@ -512,8 +553,38 @@ describe('App.vue', () => {
         expect(helper.router!.currentRoute.value.path).toBe('/apps/media-archive')
     })
 
-    it('updates the matching card when the detail page emits updated', async () => {
-        const get = vi.fn().mockResolvedValueOnce(sample)
+    it('decrements the total as soon as the asset is deleted', async () => {
+        // The reload that follows the delete is left pending, so the
+        // header shows the count the deletion left behind rather than
+        // the one the server sends back.
+        const second: MediaAsset = { ...sample, id: 'test-2' }
+        const get = vi.fn()
+            .mockResolvedValueOnce({
+                assets: [sample, second],
+                page: 1,
+                perPage: 24,
+                total: 2,
+                lastPage: 1,
+            })
+            .mockResolvedValueOnce(sample)
+            .mockReturnValueOnce(new Promise<MediaListResponse>(() => {}))
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('header p').text()).toContain('2 assets')
+
+        helper.router!.push(`/apps/media-archive/asset/${sample.id}`)
+        await flushPromises()
+        await flushPromises()
+        const detail = wrapper.findComponent({ name: 'MediaDetailPage' })
+        detail.vm.$emit('deleted', sample.id)
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('header p').text()).toContain('1 asset')
+    })
+
+    it('updates the matching card when the detail page emits updated', async () => {        const get = vi.fn().mockResolvedValueOnce(sample)
         const helper = buildContext(get, { path: `/apps/media-archive/asset/${sample.id}` })
         const wrapper = mount(App, {
             props: { hostContext: helper },
@@ -726,7 +797,7 @@ describe('App.vue', () => {
         await flushPromises()
         await flushPromises()
         expect(wrapper.find('[data-testid="media-load-more-button"]').exists()).toBe(true)
-        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+        await pickType(wrapper, 'image')
         await flushPromises()
         await flushPromises()
         expect(get.mock.calls.at(-1)?.[0]).toContain('page=1')
@@ -824,7 +895,7 @@ describe('App.vue', () => {
 
         // Mid-append: change the type filter — setType() calls load(),
         // which bumps requestId and starts a replace.
-        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+        await pickType(wrapper, 'image')
         await flushPromises()
 
         // Settle the superseded append. The (ungated) finally must run
@@ -867,7 +938,7 @@ describe('App.vue', () => {
         expect(get).toHaveBeenCalledTimes(1)
         expect(get.mock.calls[0]?.[0]).toContain('include_temporary=false')
 
-        // Click the toggle in MediaFilters — it mutates the shared
+        // Click the toggle in the toolbar — it mutates the shared
         // singleton, which triggers App.vue's reload watcher.
         await wrapper.find<HTMLInputElement>('[data-testid="media-show-temporary"]').setValue(true)
         await flushPromises()
@@ -940,7 +1011,7 @@ describe('App.vue', () => {
         const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        await wrapper.find('[data-testid="media-kind-template"]').trigger('click')
+        await pickKind(wrapper, 'template')
         await flushPromises()
         await flushPromises()
         const last = get.mock.calls.at(-1)?.[0] ?? ''
@@ -983,14 +1054,14 @@ describe('App.vue', () => {
         await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('click')
         await flushPromises()
         await flushPromises()
-        await wrapper.find('[data-testid="media-scope-202"]').trigger('click')
+        await pickScope(wrapper, 202)
         await flushPromises()
         await flushPromises()
         const last = get.mock.calls.at(-1)?.[0] ?? ''
         expect(last).not.toContain('folder_id=')
     })
 
-    it('offers neither the kind filter nor the folder tree when the core has no folders endpoint', async () => {
+    it('offers neither the kind filter nor the folder rail when the core has no folders endpoint', async () => {
         // A 404 on `GET /media/folders` means the core predates the
         // folders release: it has no folders and it ignores `?kind=`.
         // Offering a filter the server ignores is worse than offering
@@ -1000,8 +1071,8 @@ describe('App.vue', () => {
         const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        expect(wrapper.find('[data-testid="media-kind-pills"]').exists()).toBe(false)
-        expect(wrapper.find('[data-testid="media-folder-tree"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-kind-select-toggle"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-folder-rail"]').exists()).toBe(false)
     })
 
     it('keeps the kind filter when the folders endpoint fails for another reason', async () => {
@@ -1013,7 +1084,8 @@ describe('App.vue', () => {
         const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        expect(wrapper.find('[data-testid="media-kind-pills"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-kind-select-toggle"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="media-folder-rail"]').exists()).toBe(true)
     })
 
     it('probes the folders endpoint when the caller has no visible principal', async () => {
@@ -1025,6 +1097,111 @@ describe('App.vue', () => {
         const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
         await flushPromises()
-        expect(wrapper.find('[data-testid="media-kind-pills"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-kind-select-toggle"]').exists()).toBe(false)
+    })
+})
+
+describe('App.vue arrangement', () => {
+    beforeEach(() => {
+        vi.useFakeTimers()
+        __resetShowTemporaryToggleForTesting()
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+        vi.restoreAllMocks()
+        __resetShowTemporaryToggleForTesting()
+    })
+
+    it('lays the folder rail out beside the grid', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        const rail = wrapper.find('[data-testid="media-folder-rail"]')
+        expect(rail.exists()).toBe(true)
+        // The tree's root lives in the rail, not in the grid column.
+        expect(rail.find('[data-testid="media-folder-root"]').exists()).toBe(true)
+        expect(rail.find('[data-testid="media-folder-folder-1"]').exists()).toBe(true)
+    })
+
+    it('keeps the search box and the upload button in the toolbar beside the grid', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        const main = wrapper.find('main')
+        expect(main.find('[data-testid="media-search"]').exists()).toBe(true)
+        expect(main.find('[data-testid="media-archive-upload-button"]').exists()).toBe(true)
+        expect(main.find('[data-testid="media-type-select-toggle"]').exists()).toBe(true)
+        expect(main.find('[data-testid="media-kind-select-toggle"]').exists()).toBe(true)
+    })
+
+    it('tells the grid which folder it is showing, so an empty folder is not called an empty archive', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        // The whole library is empty…
+        expect(wrapper.find('[data-testid="media-grid-empty"]').text()).toContain('No media yet')
+        // …but a folder that holds nothing says so.
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-grid-empty"]').text()).toContain('This folder is empty.')
+    })
+
+    it('opens the folder drawer from the toolbar and closes it on the backdrop', async () => {        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-rail-backdrop"]').exists()).toBe(false)
+
+        await wrapper.find('[data-testid="media-rail-open"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-rail-backdrop"]').exists()).toBe(true)
+
+        await wrapper.find('[data-testid="media-rail-backdrop"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-rail-backdrop"]').exists()).toBe(false)
+    })
+
+    it('opens the new-folder dialog from the rail', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-new-folder-dialog"]').exists()).toBe(false)
+
+        await wrapper.find('[data-testid="media-new-folder-button"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-new-folder-dialog"]').exists()).toBe(true)
+    })
+
+    it('files a created folder under its principal and selects it', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+        await wrapper.find('[data-testid="media-new-folder-button"]').trigger('click')
+        await flushPromises()
+
+        const dialog = wrapper.findComponent({ name: 'MediaNewFolderDialog' })
+        dialog.vm.$emit('created', {
+            folder: { id: 'folder-9', name: 'Q3', path: '/Q3', parent_id: null, asset_count: 0 },
+            principalId: 101,
+        })
+        dialog.vm.$emit('close')
+        await flushPromises()
+        await flushPromises()
+
+        // The new folder joins its principal's tree…
+        expect(wrapper.find('[data-testid="media-folder-folder-9"]').exists()).toBe(true)
+        // …and becomes the selected folder.
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('folder_id=folder-9')
     })
 })

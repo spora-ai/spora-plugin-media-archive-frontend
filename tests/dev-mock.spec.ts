@@ -143,14 +143,50 @@ describe('createMockApi', () => {
 
     it('answers the principals endpoint so the folder tree has a principal', async () => {
         const result = await api.get<{ principals: MediaPrincipal[] }>('/principals/me')
-        expect(result.principals).toHaveLength(1)
+        // A user-principal and a group-principal: the rail groups the
+        // tree by owner in the "all principals" scope, and one principal
+        // cannot show that.
+        expect(result.principals).toHaveLength(2)
         expect(result.principals[0]?.type).toBe('user')
+        expect(result.principals[1]?.type).toBe('group')
     })
 
-    it('returns the folder tree for the folders endpoint', async () => {
-        const result = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=42')
-        expect(result.folders.length).toBeGreaterThan(0)
-        expect(result.folders[0]?.parent_id).toBeNull()
+    it('returns the folder tree for the folders endpoint, per principal', async () => {
+        const mine = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=1')
+        expect(mine.folders.length).toBeGreaterThan(0)
+        expect(mine.folders[0]?.parent_id).toBeNull()
+
+        const group = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=2')
+        expect(group.folders.length).toBeGreaterThan(0)
+        expect(group.folders.map((folder) => folder.id)).not.toEqual(mine.folders.map((folder) => folder.id))
+    })
+
+    it('creates a folder under its parent and refuses a duplicate name', async () => {
+        const created = await api.post<MediaFolder>('/media/folders', {
+            name: 'Print',
+            parent_id: 'folder-corporate',
+            principal_id: 1,
+        })
+        expect(created.name).toBe('Print')
+        expect(created.path).toBe('/Corporate/Print')
+        expect(created.parent_id).toBe('folder-corporate')
+
+        const tree = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=1')
+        expect(tree.folders.map((folder) => folder.id)).toContain(created.id)
+
+        await expect(api.post('/media/folders', {
+            name: 'Print',
+            parent_id: 'folder-corporate',
+            principal_id: 1,
+        })).rejects.toThrow()
+    })
+
+    it('refuses a parent of another principal, as the server does', async () => {
+        await expect(api.post('/media/folders', {
+            name: 'Print',
+            parent_id: 'folder-shared',
+            principal_id: 1,
+        })).rejects.toThrow()
     })
 
     it('narrows results by ?folder_id=', async () => {

@@ -28,31 +28,124 @@ The detail drawer (right-side panel that opens when a card is selected) covers t
 
 - The grid renders 24 rows per page; if the response carries `lastPage > 1` a 'Load more' button appears under the cards with a 'Showing N of total' counter.
 - Clicking appends the next page; rows are deduplicated by id against the existing rows so a concurrent insert landing the same row on consecutive pages doesn't render it twice.
-- Filter changes (type pill, kind chip, folder, search, scope chip) reset to page 1 — the Load-more button disappears when `lastPage` drops back to 1.
+- Filter changes (file type, kind, folder, search, scope) reset to page 1 — the Load-more button disappears when `lastPage` drops back to 1.
 
-## Scope chip row
+## The panel's shape
 
-The grid mounts a dashboard-style `ALL / My Media / Group A / …` chip row above the search input:
+The panel is a **folder rail** on the left and the **grid** on the right:
 
-- Pulls `/principals/me` + `/groups` on mount to populate the chip labels; both calls are best-effort so a transient failure leaves the empty-label fallback (`Group #N`) without blocking the grid.
-- Translates the single-pick chip state into repeated `?principal_id=` keys on the listing request — `ALL` sends every visible principal, `My Media` sends just the user-principal, a group chip sends just that group's principal. The controller intersects with `visiblePrincipalIds()`, so an out-of-scope id never reaches the service.
-- Click-the-active-chip-to-clear: matches the dashboard's flag-chip toggle behaviour.
+```
+┌──────────────────┬──────────────────────────────────────────┐
+│ [scope dropdown] │ [search]  [All file types ▾] [All kinds ▾] │
+│ FOLDERS  + New   │ ┌────┐ ┌────┐ ┌────┐ ┌────┐              │
+│  All media   32  │ │card│ │card│ │card│ │card│              │
+│  ▸ My Media    4  │ └────┘ └────┘ └────┘ └────┘              │
+│    Brand      3  │                                          │
+│    Fonts      2  │                                          │
+│  ▸ Test Group  2 │                                          │
+│    Shared     4  │                                          │
+└──────────────────┴──────────────────────────────────────────┘
+```
 
-## Folder tree
+- The **scope dropdown sits at the top of the rail**, above the "Folders"
+  heading, because it governs the whole panel: the folders in the tree
+  *and* the assets in the grid. It is the Custom Skills panel's scope
+  control (avatar, name, kind), not a chip row — a chip row reads as a
+  filter, and a filter does not say "everything below this belongs to what
+  I picked".
+- The **file type and the kind are dropdowns** in the toolbar, in the
+  Custom Skills style: a bordered `h-8` control with a chevron.
+- The **rail becomes a drawer** below `lg`: 256px is most of a phone's
+  width. It slides in from the left, and the toolbar carries a compact
+  copy of the scope so the panel still says whose media it is showing
+  while the drawer is closed. Escape closes an open menu first and the
+  drawer second.
 
-The filter bar carries a tree of the media library's folders, built on the client from the flat `parent_id` list the server returns:
+### Scope
 
-- `GET /media/folders?principal_id=…` answers per principal, so the panel asks once per visible principal and keeps the answers apart. The tree shows the folders of the principals **in scope**: a folder of a principal outside the scope would filter the listing down to nothing, so it is not offered.
-- The tree's root is the whole library; picking a folder sends the scalar `?folder_id=<uuid>`. The array-bracket form is deliberately not used — a multi-folder filter would need a `WHERE folder_id IN (…)`, and a half-implemented one that silently returns a single folder's rows is worse than none.
-- Each folder shows the number of assets filed *directly* in it, and the root carries no count (the endpoint does not report one).
-- Changing the scope drops a folder selection the new scope cannot filter by.
+The scope dropdown replaces the old `ALL / My Media / Group A / …` chip
+row:
 
-## Kind filter
+- Pulls `/principals/me` + `/groups` on mount to populate the labels;
+  both calls are best-effort so a transient failure leaves the empty-label
+  fallback (`Group #N`) without blocking the grid.
+- Translates the single-pick scope state into repeated `?principal_id=`
+  keys on the listing request — "all principals" sends every visible
+  principal, "My Media" sends just the user-principal, a group sends just
+  that group's principal. The controller intersects with
+  `visiblePrincipalIds()`, so an out-of-scope id never reaches the
+  service.
 
-An `asset / template / example` chip row next to the type pills, plus an unfiltered state:
+### Folder tree
 
-- The mark is advisory — nothing in the read or the write path refuses an asset because of it — and the operator owns it, so the detail page offers it as a select that PATCHes `{"kind": …}`.
-- The listing request carries one `?kind=` value; the server drops an unknown one and leaves the listing unfiltered.
+The rail carries a tree of the media library's folders, built on the
+client from the flat `parent_id` list the server returns:
+
+- `GET /media/folders?principal_id=…` answers per principal, so the panel
+  asks once per visible principal and keeps the answers apart. The tree
+  shows the folders of the principals **in scope**: a folder of a
+  principal outside the scope would filter the listing down to nothing,
+  so it is not offered.
+- **A folder belongs to a principal**, so the tree shows that ownership
+  structurally. In one principal's scope the tree is that principal's
+  folders; in the "all principals" scope it is *grouped* — each principal
+  a heading, its folders under it — because two principals may own
+  folders with the same name. The server intersects the folder filter
+  with the principal scope, so a folder outside it yields no rows and no
+  hint that it exists.
+- The group heading carries the number of **folders** that principal owns
+  and picks the scope when it is clicked. It cannot carry an asset count:
+  the panel is only told the total of the listing it just fetched, and
+  that total is filtered by the scope, the type, the kind and the search
+  — it is not the principal's holding.
+- The tree's root is the whole library; picking a folder sends the
+  scalar `?folder_id=<uuid>`. The array-bracket form is deliberately not
+  used — a multi-folder filter would need a `WHERE folder_id IN (…)`,
+  and a half-implemented one that silently returns a single folder's rows
+  is worse than none.
+- Each folder shows the number of assets filed *directly* in it, and the
+  root carries no count (the endpoint does not report one).
+- Changing the scope drops a folder selection the new scope cannot filter
+  by.
+
+### Creating a folder
+
+The rail's **New folder** button opens a dialog — the upload dialog's
+shape, because both are the operator's dialog:
+
+- The name, the principal the folder belongs to, and the parent it sits
+  under. A folder always belongs to one principal, so the principal is
+  part of the form.
+- The parent is chosen from a **tree picker**, not a `<select>`: a select
+  cannot show the tree, and the tree is the thing being chosen between.
+- The path preview shows what the folder will be called before it is
+  called.
+- `POST /media/folders` answers 422 `NOT_UNIQUE` for a sibling name that
+  is taken, and the dialog says so in the operator's words.
+
+### Kind filter
+
+An `asset / template / example` dropdown in the toolbar, plus an
+unfiltered state:
+
+- The mark is advisory — nothing in the read or the write path refuses an
+  asset because of it — and the operator owns it, so the detail page
+  offers it as a select that PATCHes `{"kind": …}`.
+- The listing request carries one `?kind=` value; the server drops an
+  unknown one and leaves the listing unfiltered.
+
+## Tailwind and the transform defaults
+
+The plugin ships **no preflight** — the host owns the document-level
+resets — and Tailwind v3 emits its `--tw-translate-x`, `--tw-rotate`,
+`--tw-scale-x` defaults in the same base rule as its preflight. A
+transform utility reads them, so without the defaults the `transform`
+declaration is invalid at computed-value time and the element keeps
+`transform: none` — the utility silently does nothing.
+
+`src/style.css` therefore carries those defaults itself, scoped to
+`#spora-plugin-media-archive`. The host's Tailwind v4 does not define
+them either, so the plugin cannot borrow them from there.
 
 ## Upload
 

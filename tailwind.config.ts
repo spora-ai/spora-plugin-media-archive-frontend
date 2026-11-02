@@ -33,6 +33,14 @@ export default {
                 ring: 'hsl(var(--ring))',
                 background: 'hsl(var(--background))',
                 foreground: 'hsl(var(--foreground))',
+                // The host defines no `--card` variable — its theme maps the
+                // card utility as `--color-card: hsl(var(--background))`, so
+                // the card IS the background. Without this the utility
+                // generates nothing and every `bg-card` surface (the
+                // dropdown menus, the cards, the empty state) renders
+                // transparent.
+                card: 'hsl(var(--background))',
+                'card-foreground': 'hsl(var(--foreground))',
                 primary: {
                     DEFAULT: 'hsl(var(--primary))',
                     foreground: 'hsl(var(--primary-foreground))',

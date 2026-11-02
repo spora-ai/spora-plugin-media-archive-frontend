@@ -6,3 +6,38 @@
  */
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Tailwind's transform defaults.
+ *
+ * Tailwind v3 emits `--tw-translate-x`, `--tw-rotate`, `--tw-scale-x` and
+ * the rest in the same base rule as its preflight. A transform utility
+ * reads them:
+ *
+ *     .-translate-x-full {
+ *       --tw-translate-x: -100%;
+ *       transform: translate(var(--tw-translate-x), var(--tw-translate-y))
+ *                  rotate(var(--tw-rotate)) …;
+ *     }
+ *
+ * Without the defaults the `transform` declaration references variables
+ * that do not exist, so it is invalid at computed-value time and the
+ * element keeps `transform: none` — the utility silently does nothing.
+ * The host's Tailwind v4 does not define these variables either, so the
+ * plugin has to carry them itself.
+ *
+ * The utilities are more specific than this rule, so a utility that sets
+ * one of the variables still wins; this only supplies the ones the
+ * utility leaves undefined.
+ */
+#spora-plugin-media-archive *,
+#spora-plugin-media-archive ::before,
+#spora-plugin-media-archive ::after {
+    --tw-translate-x: 0;
+    --tw-translate-y: 0;
+    --tw-rotate: 0;
+    --tw-skew-x: 0;
+    --tw-skew-y: 0;
+    --tw-scale-x: 1;
+    --tw-scale-y: 1;
+}

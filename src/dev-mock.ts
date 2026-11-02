@@ -179,17 +179,41 @@ export const FOLDER_FIXTURE: MediaFolder[] = [
 ]
 
 /**
+ * The folders of the mock group principal.
+ *
+ * A folder belongs to a principal, so the sandbox carries a second
+ * principal with folders of its own: the rail groups the tree by
+ * principal in the "all principals" scope, and a single principal
+ * cannot show that.
+ */
+export const GROUP_FOLDER_FIXTURE: MediaFolder[] = [
+    { id: 'folder-shared', name: 'Shared Assets', path: '/Shared Assets', parent_id: null, asset_count: 3 },
+    { id: 'folder-photos', name: 'Photos', path: '/Shared Assets/Photos', parent_id: 'folder-shared', asset_count: 2 },
+]
+
+/**
  * The principal the sandbox acts as.
  *
  * The panel asks `/principals/me` before it asks for the folders, and
- * the folder tree follows the scope chip row — so the sandbox needs a
- * principal for the tree to render at all.
+ * the folder tree follows the scope — so the sandbox needs a principal
+ * for the tree to render at all.
  */
 export const PRINCIPAL_FIXTURE: MediaPrincipal = {
     id: 1,
     type: 'user',
     user_id: CURRENT_USER_ID,
     group_id: null,
+}
+
+/**
+ * A group principal the caller also belongs to, so the sandbox can show
+ * the tree grouped by owner.
+ */
+export const GROUP_PRINCIPAL_FIXTURE: MediaPrincipal = {
+    id: 2,
+    type: 'group',
+    user_id: null,
+    group_id: 7,
 }
 
 export type Scope = 'all' | 'mine'
@@ -249,13 +273,21 @@ export function paginate<T>(items: T[], page: number, perPage: number): T[] {
 }
 
 export function createMockApi(): PluginHostContext['api'] {
+    // The sandbox is stateful: a folder the operator creates joins the
+    // principal it belongs to, so the rail shows it.
+    const folders: Record<number, MediaFolder[]> = {
+        [PRINCIPAL_FIXTURE.id]: [...FOLDER_FIXTURE],
+        [GROUP_PRINCIPAL_FIXTURE.id]: [...GROUP_FOLDER_FIXTURE],
+    }
+
     return {
         async get<T>(path: string): Promise<T> {
             if (path === '/principals/me') {
-                return { principals: [PRINCIPAL_FIXTURE] } as unknown as T
+                return { principals: [PRINCIPAL_FIXTURE, GROUP_PRINCIPAL_FIXTURE] } as unknown as T
             }
             if (path.startsWith('/media/folders')) {
-                return { folders: FOLDER_FIXTURE } as unknown as T
+                const principalId = Number(/principal_id=(\d+)/.exec(path)?.[1])
+                return { folders: folders[principalId] ?? [] } as unknown as T
             }
             if (path.startsWith('/media/') && path !== '/media') {
                 const id = path.slice('/media/'.length).split('?')[0]
@@ -284,7 +316,34 @@ export function createMockApi(): PluginHostContext['api'] {
             }
             throw new Error(`Mock API has no handler for ${path}`)
         },
-        post: async () => {
+        async post<T>(path: string, body: unknown): Promise<T> {
+            if (path === '/media/folders') {
+                const payload = body as { name: string; parent_id: string | null; principal_id: number }
+                const list = folders[payload.principal_id] ?? []
+                const parent = payload.parent_id === null
+                    ? null
+                    : list.find((folder) => folder.id === payload.parent_id)
+                if (payload.parent_id !== null && parent === undefined) {
+                    // The server's rule: a parent of another principal is a
+                    // 404, not a 403.
+                    throw Object.assign(new Error('Media folder not found.'), { status: 404 })
+                }
+                const path_ = `${parent?.path ?? ''}/${payload.name}`
+                if (list.some((folder) => folder.path === path_ && folder.parent_id === payload.parent_id)) {
+                    throw Object.assign(new Error('A folder with that name already exists here.'), {
+                        code: 'NOT_UNIQUE',
+                    })
+                }
+                const folder: MediaFolder = {
+                    id: `folder-new-${Date.now()}`,
+                    name: payload.name,
+                    path: path_,
+                    parent_id: payload.parent_id,
+                    asset_count: 0,
+                }
+                folders[payload.principal_id] = [...list, folder]
+                return folder as unknown as T
+            }
             throw new Error('POST not supported in mock')
         },
         postForm: async (_path: string, _body: FormData) => {

@@ -11,9 +11,16 @@ const props = withDefaults(defineProps<{
      * `folder_id`, so the name on the card comes from here.
      */
     folders?: MediaFolder[] | null
+    /**
+     * The name of the folder the listing is scoped to, or `null` for the
+     * whole library. The empty state says which of the two it is: "no
+     * media yet" is wrong for an empty folder in a full archive.
+     */
+    folderName?: string | null
 }>(), {
     assets: () => [],
     folders: () => [],
+    folderName: null,
 })
 
 const { t } = useI18n()
@@ -38,7 +45,9 @@ const folderById = computed(() => {
         class="rounded-xl border border-dashed border-border bg-card/50 p-12 text-center text-sm text-muted-foreground"
         data-testid="media-grid-empty"
     >
-        {{ t('No media yet — generate something with a companion plugin to see it here.') }}
+        {{ folderName !== null
+            ? t('This folder is empty.')
+            : t('No media yet — generate something with a companion plugin to see it here.') }}
         <button
             type="button"
             class="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
