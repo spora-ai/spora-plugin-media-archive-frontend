@@ -21,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import { Upload, X } from 'lucide-vue-next'
 import type { MediaAsset, MediaFolder, MediaPrincipal } from '../types'
 import type { PluginHostContext } from '../shims'
+import MediaFolderPicker from './MediaFolderPicker.vue'
 
 interface AllowedTypes {
     mime_types: string[]
@@ -77,8 +78,8 @@ const { t } = useI18n()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const file = ref<File | null>(null)
 const principalId = ref<number | null>(null)
-/** The picked folder id, or `''` for the root. */
-const folderId = ref<string>('')
+/** The picked folder id, or `null` for the root. */
+const folderId = ref<string | null>(null)
 const prompt = ref('')
 const tags = ref('')
 const uploading = ref(false)
@@ -114,16 +115,14 @@ const principalOptions = computed(() =>
 )
 
 /**
- * The folders of the selected principal, as `<option>` rows.
+ * The folders the selected principal owns.
  *
  * Only the selected principal's folders are offered: the server files
  * the upload into the principal the form names and refuses a folder of
  * another one, so offering them would be offering a 422.
  */
-const folderOptions = computed(() =>
-    (principalId.value === null ? [] : props.foldersByPrincipal[principalId.value] ?? []).map(
-        (folder) => ({ id: folder.id, label: folder.name }),
-    ),
+const principalFolders = computed<MediaFolder[]>(() =>
+    principalId.value === null ? [] : props.foldersByPrincipal[principalId.value] ?? [],
 )
 
 /**
@@ -145,24 +144,24 @@ function resolveInitialPrincipal(): number | null {
 }
 
 /**
- * The folder the upload lands in, or `''` for the root.
+ * The folder the upload lands in, or `null` for the root.
  *
  * The panel's folder is the operator's context, so an upload belongs in
  * it. A folder of another principal cannot be used — the server refuses
  * it — so the default only applies when the principal the upload is
  * filed under owns it.
  */
-function resolveInitialFolder(): string {
+function resolveInitialFolder(): string | null {
     const folder = props.defaultFolderId
     if (folder === null || folder === '') {
-        return ''
+        return null
     }
     const principal = principalId.value
     if (principal === null) {
-        return ''
+        return null
     }
     const owned = props.foldersByPrincipal[principal] ?? []
-    return owned.some((candidate) => candidate.id === folder) ? folder : ''
+    return owned.some((candidate) => candidate.id === folder) ? folder : null
 }
 
 async function loadAllowedTypes(): Promise<void> {
@@ -248,7 +247,7 @@ async function submit(): Promise<void> {
         const form = new FormData()
         form.append('file', picked)
         form.append('principal_id', String(principal))
-        if (folderId.value !== '') {
+        if (folderId.value !== null) {
             form.append('folder_id', folderId.value)
         }
         if (picked.name !== '') {
@@ -375,24 +374,22 @@ onBeforeUnmount(() => {
                         </select>
                     </label>
 
-                    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                        {{ t('Folder (optional)') }}
-                        <select
-                            v-model="folderId"
-                            class="rounded border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-60"
-                            :disabled="folderOptions.length === 0"
-                            data-testid="upload-folder-select"
-                        >
-                            <option value="">{{ t('No folder') }}</option>
-                            <option
-                                v-for="opt in folderOptions"
-                                :key="opt.id"
-                                :value="opt.id"
-                            >
-                                {{ opt.label }}
-                            </option>
-                        </select>
-                    </label>
+                    <!--
+                      A `<div>`, not a `<label>`: the picker is a button,
+                      and a wrapping label would forward its own click to
+                      that button — opening the menu and closing it again
+                      in the same event.
+                    -->
+                    <div class="flex flex-col gap-1 text-xs text-muted-foreground">
+                        <span>{{ t('Folder (optional)') }}</span>
+                        <MediaFolderPicker
+                            :folders="principalFolders"
+                            :model-value="folderId"
+                            :label="t('Folder (optional)')"
+                            testid="upload-folder"
+                            @update:model-value="folderId = $event"
+                        />
+                    </div>
 
                     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
                         {{ t('Prompt (optional)') }}

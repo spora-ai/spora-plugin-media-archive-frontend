@@ -771,7 +771,6 @@ onBeforeUnmount(() => {
             v-if="isOnDetailPage && activeAssetId !== null"
             :asset-id="activeAssetId"
             :host-context="hostContext"
-            :folders="allFolders"
             :folders-by-principal="foldersByPrincipal"
             @updated="onAssetUpdated"
             @deleted="onAssetDeleted"

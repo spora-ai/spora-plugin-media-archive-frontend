@@ -392,7 +392,12 @@ export function createMockApi(): PluginHostContext['api'] {
             if (payload.kind !== undefined) {
                 found.kind = payload.kind as MediaAsset['kind']
             }
-            return Promise.resolve(found as unknown as T)
+            // A copy, not the mutated row: the panel holds the asset in a
+            // reactive proxy, and a mutation behind the proxy's back
+            // never reaches it — the panel would keep showing the old
+            // folder. The server answers with a fresh row, so the
+            // sandbox does too.
+            return Promise.resolve({ ...found } as unknown as T)
         },
         delete: async () => {
             throw new Error('DELETE not supported in mock')

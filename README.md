@@ -137,6 +137,23 @@ Two ways, both making the same `PATCH /media/{id}` with a `folder_id`:
 HTML drag and drop needs a mouse; on a touch screen the detail page's
 picker is the way.
 
+### Picking a folder
+
+`MediaFolderPicker.vue` is the one component that picks a folder, and the
+detail page and the upload dialog both use it. It draws the tree the
+folders' `parent_id` describes, indented — a `<select>` lists the folders
+flat, and a folder called "2026" under "Corporate" would be
+indistinguishable from one under "Templates".
+
+- The trigger shows the chosen folder's **path**, so the tree is still
+  readable once the menu is closed.
+- The menu lists the folders of one principal, indented by their depth,
+  with each folder's asset count and a tick on the chosen one.
+- The top row, **No folder**, takes the asset out of its folder.
+- A chosen folder that resolves to nothing is listed on its own row as
+  **Unknown folder**: the asset is filed in a folder the panel cannot
+  see, and "No folder" would be a false claim.
+
 ### Kind filter
 
 An `asset / template / example` dropdown in the toolbar, plus an
@@ -177,6 +194,8 @@ the drawer goes off-screen on a narrow one.
 
 - The upload dialog attributes the file to one of the operator's visible principals, and can file it into one of **that** principal's folders. The picker offers only the selected principal's folders — the server files the upload into the principal the form names and refuses a folder of another one, so offering them would be offering a 422.
 - Changing the principal drops the picked folder.
+- The folder is picked with `MediaFolderPicker.vue`, the same component the
+  detail page uses, so the upload offers the same tree.
 
 ## Build
 

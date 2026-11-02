@@ -20,6 +20,7 @@ import { MdPreview } from 'md-editor-v3'
 // Deliberately kept although the editor is gone: `<MdPreview>` needs its typography.
 import 'md-editor-v3/lib/style.css'
 import VersionsStrip from '../components/VersionsStrip.vue'
+import MediaFolderPicker from '../components/MediaFolderPicker.vue'
 
 // `md-editor-v3` defaults to Chinese; pin the preview to en-US.
 const MARKDOWN_LOCALE = 'en-US'
@@ -27,11 +28,6 @@ const MARKDOWN_LOCALE = 'en-US'
 const props = defineProps<{
     assetId: string
     hostContext: PluginHostContext
-    /**
-     * The folders of the visible principals. The asset carries only a
-     * `folder_id`, so the folder's name comes from here.
-     */
-    folders?: MediaFolder[]
     /**
      * The folders of every visible principal, keyed by principal id.
      *
@@ -346,21 +342,6 @@ const folderId = computed<string | null>(() => {
 })
 
 /**
- * The asset's folder, resolved from the folder list the parent holds.
- *
- * The asset carries only a `folder_id`; the name comes from the list.
- * A folder outside the visible principals is not in the list, so it
- * shows as unknown rather than as a wrong name.
- */
-const folder = computed<MediaFolder | null>(() => {
-    const id = folderId.value
-    if (id === null) {
-        return null
-    }
-    return props.folders?.find((candidate) => candidate.id === id) ?? null
-})
-
-/**
  * The principal the asset belongs to.
  *
  * A folder write is scoped by it: the server refuses a folder of
@@ -391,25 +372,25 @@ const fileableFolders = computed<MediaFolder[]>(() => {
  *
  * A refused PATCH leaves the server's folder unchanged, and a bound
  * `:value` is not re-patched when the bound value does not change — so
- * the select would keep showing a folder the server never accepted.
+ * the picker would keep showing a folder the server never accepted.
  * The local ref is reset from the server's folder on every change.
  */
-const folderSelection = ref<string>('')
+const folderSelection = ref<string | null>(null)
 
 watch(folderId, (value) => {
-    folderSelection.value = value ?? ''
+    folderSelection.value = value
 }, { immediate: true })
 
-async function setFolder(next: string): Promise<void> {
-    if (asset.value === null || next === (folderId.value ?? '')) {
+async function setFolder(next: string | null): Promise<void> {
+    if (asset.value === null || next === folderId.value) {
         return
     }
     const result = await mutate({
         field: 'folder',
         verb: 'patch',
         path: `/media/${asset.value.id}`,
-        body: { folder_id: next === '' ? null : next },
-        successToast: next === ''
+        body: { folder_id: next },
+        successToast: next === null
             ? t('Removed from the folder')
             : t('Moved to the folder'),
     })
@@ -417,7 +398,7 @@ async function setFolder(next: string): Promise<void> {
         emit('updated', result.updated)
         return
     }
-    folderSelection.value = folderId.value ?? ''
+    folderSelection.value = folderId.value
 }
 
 /**
@@ -1146,31 +1127,14 @@ onBeforeUnmount(() => {
 
                         <dt class="text-muted-foreground">{{ t('Folder') }}</dt>
                         <dd class="col-span-2" data-testid="media-detail-folder">
-                            <label for="media-detail-folder" class="sr-only">{{ t('Folder') }}</label>
-                            <select
-                                id="media-detail-folder"
-                                v-model="folderSelection"
-                                :disabled="savingField !== null || fileableFolders.length === 0"
-                                class="rounded border border-border bg-background px-2 py-1 text-foreground disabled:opacity-50"
-                                data-testid="media-detail-folder-select"
-                                @change="setFolder(folderSelection)"
-                            >
-                                <option value="">{{ t('No folder') }}</option>
-                                <option
-                                    v-if="folderId !== null && folder === null"
-                                    :value="folderId"
-                                    disabled
-                                >
-                                    {{ t('Unknown folder') }}
-                                </option>
-                                <option
-                                    v-for="candidate in fileableFolders"
-                                    :key="candidate.id"
-                                    :value="candidate.id"
-                                >
-                                    {{ candidate.name }}
-                                </option>
-                            </select>
+                            <MediaFolderPicker
+                                :folders="fileableFolders"
+                                :model-value="folderSelection"
+                                :label="t('Folder')"
+                                :disabled="savingField !== null"
+                                testid="media-detail-folder"
+                                @update:model-value="setFolder"
+                            />
                         </dd>
 
                         <dt class="text-muted-foreground">{{ t('Kind') }}</dt>

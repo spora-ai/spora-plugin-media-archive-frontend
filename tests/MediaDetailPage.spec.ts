@@ -299,9 +299,6 @@ describe('MediaDetailPage', () => {
             props: {
                 assetId: sample.id,
                 hostContext,
-                folders: [
-                    { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
-                ],
                 foldersByPrincipal: {
                     7: [
                         { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
@@ -310,9 +307,56 @@ describe('MediaDetailPage', () => {
             },
         })
         await flushPromises()
-        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
-        expect((select.element as HTMLSelectElement).value).toBe('folder-1')
-        expect(wrapper.find('[data-testid="media-detail-folder"]').text()).toContain('Corporate')
+        const trigger = wrapper.find('[data-testid="media-detail-folder-toggle"]')
+        expect(trigger.text()).toContain('Corporate')
+    })
+
+    it('shows the whole path of the folder, so the tree is visible when the menu is closed', async () => {
+        // The name alone cannot say whether "2026" is the one under
+        // "Corporate" or under "Templates".
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: 'folder-2', principal_id: 7 })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, {
+            props: {
+                assetId: sample.id,
+                hostContext,
+                foldersByPrincipal: {
+                    7: [
+                        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 1 },
+                    ],
+                },
+            },
+        })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-detail-folder-toggle"]').text()).toContain('Corporate/2026')
+    })
+
+    it('draws the folder tree, so a nested folder is not mistaken for a top-level one', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: null, principal_id: 7 })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, {
+            props: {
+                assetId: sample.id,
+                hostContext,
+                foldersByPrincipal: {
+                    7: [
+                        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 1 },
+                    ],
+                },
+            },
+        })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-detail-folder-toggle"]').trigger('click')
+
+        const parent = wrapper.find('[data-testid="media-detail-folder-option-folder-1"]')
+        const child = wrapper.find('[data-testid="media-detail-folder-option-folder-2"]')
+        const indent = (element: { attributes: (name: string) => string | undefined }): number =>
+            Number.parseFloat(
+                (element.attributes('style') ?? '').match(/padding-left:\s*([\d.]+)rem/)?.[1] ?? '0',
+            )
+        expect(indent(child)).toBeGreaterThan(indent(parent))
     })
 
     it('shows no folder name for an asset in the root', async () => {
@@ -344,18 +388,19 @@ describe('MediaDetailPage', () => {
             props: {
                 assetId: sample.id,
                 hostContext,
-                folders: [
-                    { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
-                ],
+                foldersByPrincipal: {
+                    7: [
+                        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                    ],
+                },
             },
         })
         await flushPromises()
-        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
-        const options = Array.from((select.element as HTMLSelectElement).options)
-        const unknown = options.find((option) => option.value === 'folder-x')
-        expect(unknown?.textContent).toContain('Unknown folder')
-        expect(unknown?.disabled).toBe(true)
-        expect((select.element as HTMLSelectElement).value).toBe('folder-x')
+        expect(wrapper.find('[data-testid="media-detail-folder-toggle"]').text()).toContain('Unknown folder')
+        await wrapper.find('[data-testid="media-detail-folder-toggle"]').trigger('click')
+        const unresolved = wrapper.find('[data-testid="media-detail-folder-option-unresolved"]')
+        expect(unresolved.text()).toContain('Unknown folder')
+        expect(unresolved.attributes('aria-checked')).toBe('true')
     })
 
     it('saves a changed kind', async () => {
@@ -391,9 +436,8 @@ describe('MediaDetailPage', () => {
             },
         })
         await flushPromises()
-        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
-        ;(select.element as HTMLSelectElement).value = 'folder-2'
-        await select.trigger('change')
+        await wrapper.find('[data-testid="media-detail-folder-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-detail-folder-option-folder-2"]').trigger('click')
         await flushPromises()
         expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { folder_id: 'folder-2' })
         expect(wrapper.emitted('updated')?.[0]?.[0]).toMatchObject({ folder_id: 'folder-2' })
@@ -415,9 +459,8 @@ describe('MediaDetailPage', () => {
             },
         })
         await flushPromises()
-        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
-        ;(select.element as HTMLSelectElement).value = ''
-        await select.trigger('change')
+        await wrapper.find('[data-testid="media-detail-folder-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-detail-folder-option-root"]').trigger('click')
         await flushPromises()
         expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { folder_id: null })
     })
@@ -442,10 +485,14 @@ describe('MediaDetailPage', () => {
             },
         })
         await flushPromises()
-        const options = Array.from(
-            (wrapper.find('[data-testid="media-detail-folder-select"]').element as HTMLSelectElement).options,
-        ).map((option) => option.value)
-        expect(options).toEqual(['', 'folder-1'])
+        await wrapper.find('[data-testid="media-detail-folder-toggle"]').trigger('click')
+        const options = wrapper
+            .findAll('[role="menuitemradio"]')
+            .map((option) => option.attributes('data-testid'))
+        expect(options).toEqual([
+            'media-detail-folder-option-root',
+            'media-detail-folder-option-folder-1',
+        ])
     })
 
     it('keeps the mark when the save is rejected', async () => {

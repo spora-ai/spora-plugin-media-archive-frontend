@@ -146,8 +146,20 @@ function principalSelect(): HTMLSelectElement {
     return document.querySelector('[data-testid="upload-principal-select"]') as HTMLSelectElement
 }
 
-function folderSelect(): HTMLSelectElement {
-    return document.querySelector('[data-testid="upload-folder-select"]') as HTMLSelectElement
+function folderToggle(): HTMLButtonElement {
+    return document.querySelector('[data-testid="upload-folder-toggle"]') as HTMLButtonElement
+}
+
+function folderOption(id: string): HTMLButtonElement {
+    return document.querySelector(`[data-testid="upload-folder-option-${id}"]`) as HTMLButtonElement
+}
+
+/**
+ * Open the folder picker's menu and wait for it to render.
+ */
+async function openFolderMenu(): Promise<void> {
+    folderToggle().click()
+    await flushPromises()
 }
 
 function uploadDialog(): HTMLDialogElement {
@@ -390,11 +402,34 @@ describe('MediaUploadDialog', () => {
         })
         wrapper.vm.open()
         await flushPromises()
-        const options = Array.from(folderSelect().options)
-        // The unfiled option plus the folders of principal 101.
-        expect(options).toHaveLength(3)
-        expect(options[1]?.text).toBe('Corporate')
-        expect(options[2]?.text).toBe('2026')
+        await openFolderMenu()
+        const options = Array.from(document.querySelectorAll('[data-testid^="upload-folder-option-"]'))
+        // The root plus the folders of principal 101, in tree order.
+        expect(options.map((option) => option.getAttribute('data-testid'))).toEqual([
+            'upload-folder-option-root',
+            'upload-folder-option-folder-1',
+            'upload-folder-option-folder-2',
+        ])
+        expect(options[0]?.textContent).toContain('No folder')
+        expect(options[1]?.textContent).toContain('Corporate')
+        expect(options[2]?.textContent).toContain('2026')
+        wrapper.unmount()
+    })
+
+    it('draws the folder tree, so a nested folder is not mistaken for a top-level one', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        await openFolderMenu()
+        const indent = (testid: string): number => {
+            const style = (document.querySelector(`[data-testid="${testid}"]`) as HTMLElement).style
+            return Number.parseFloat(style.paddingLeft)
+        }
+        expect(indent('upload-folder-option-folder-2')).toBeGreaterThan(indent('upload-folder-option-folder-1'))
         wrapper.unmount()
     })
 
@@ -410,8 +445,8 @@ describe('MediaUploadDialog', () => {
         setInputFiles(fileInput(), file)
         fireChange(fileInput())
         await flushPromises()
-        folderSelect().value = 'folder-1'
-        folderSelect().dispatchEvent(new Event('change', { bubbles: true }))
+        await openFolderMenu()
+        folderOption('folder-1').click()
         await flushPromises()
         submitForm().click()
         await flushPromises()
@@ -434,7 +469,8 @@ describe('MediaUploadDialog', () => {
         setInputFiles(fileInput(), file)
         fireChange(fileInput())
         await flushPromises()
-        expect(folderSelect().value).toBe('folder-2')
+        // The path, so the tree is visible with the menu closed.
+        expect(folderToggle().textContent).toContain('Corporate/2026')
         submitForm().click()
         await flushPromises()
         const [, form] = harness.api.postForm.mock.calls[0] ?? []
@@ -491,13 +527,13 @@ describe('MediaUploadDialog', () => {
         })
         wrapper.vm.open()
         await flushPromises()
-        folderSelect().value = 'folder-1'
-        folderSelect().dispatchEvent(new Event('change', { bubbles: true }))
+        await openFolderMenu()
+        folderOption('folder-1').click()
         await flushPromises()
         principalSelect().value = '202'
         principalSelect().dispatchEvent(new Event('change', { bubbles: true }))
         await flushPromises()
-        expect(folderSelect().value).toBe('')
+        expect(folderToggle().textContent).toContain('No folder')
         wrapper.unmount()
     })
 })
