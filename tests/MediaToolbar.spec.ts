@@ -93,6 +93,16 @@ describe('MediaToolbar.vue type dropdown', () => {
         const wrapper = mountToolbar({ type: 'audio' })
         expect(wrapper.find('[data-testid="media-type-select-toggle"]').text()).toContain('Audio')
     })
+
+    it('closes the menu on the choice', async () => {
+        // The pick is the answer: a menu that stays open over the grid
+        // it just changed hides the result.
+        const wrapper = mountToolbar()
+        await wrapper.find('[data-testid="media-type-select-toggle"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-type-select-menu"]').exists()).toBe(true)
+        await wrapper.find('[data-testid="media-type-select-option-image"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-type-select-menu"]').exists()).toBe(false)
+    })
 })
 
 describe('MediaToolbar.vue kind dropdown', () => {

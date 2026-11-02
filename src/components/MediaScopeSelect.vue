@@ -50,7 +50,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { open, root, toggle } = useDropdownMenu()
+const { open, root, toggle, close } = useDropdownMenu()
 
 /**
  * The label of a principal: "My Media" for the user-principal, the
@@ -86,6 +86,9 @@ const triggerSubLabel = computed(() =>
 )
 
 function choose(scope: number | null): void {
+    // The menu closes on the choice: the pick is the answer, and a menu
+    // that stays open over the tree it just changed hides the result.
+    close()
     emit('update:scope', scope)
 }
 </script>

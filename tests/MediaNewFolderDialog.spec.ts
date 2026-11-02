@@ -59,6 +59,7 @@ const mounted: VueWrapper[] = []
 function mountDialog(props: {
     hostContext?: PluginHostContext
     principals?: MediaPrincipal[]
+    groupLabels?: Record<number, string>
     defaultPrincipalId?: number | null
     defaultParentId?: string | null
 } = {}) {
@@ -66,6 +67,7 @@ function mountDialog(props: {
         props: {
             hostContext: props.hostContext ?? buildHost(),
             principals: props.principals ?? principals,
+            groupLabels: props.groupLabels ?? {},
             foldersByPrincipal,
             // `null` is a meaningful value here — "no principal chosen" —
             // so the default only applies when the caller said nothing.
@@ -85,6 +87,15 @@ function mountDialog(props: {
 function pressSubmit(wrapper: VueWrapper): void {
     const button = wrapper.find('[data-testid="media-new-folder-submit"]').element as HTMLButtonElement
     button.click()
+}
+
+/**
+ * The principal `<select>`, read from the document: the dialog is
+ * mounted into the body, and the element's type is what carries the
+ * options.
+ */
+function principalSelect(): HTMLSelectElement {
+    return document.querySelector('[data-testid="media-new-folder-principal"]') as HTMLSelectElement
 }
 
 afterEach(() => {
@@ -107,6 +118,25 @@ describe('MediaNewFolderDialog.vue opening', () => {
         expect(wrapper.find('[data-testid="media-new-folder-parent-folder-1"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-new-folder-parent-folder-2"]').exists()).toBe(true)
         expect(wrapper.find('[data-testid="media-new-folder-parent-folder-3"]').exists()).toBe(false)
+    })
+
+    it('names the principals the way the panel names them', () => {
+        // The group names come from `GET /groups`; a group whose name
+        // is not available yet is listed as `Group #N`.
+        mountDialog({
+            groupLabels: { 202: 'Marketing Team' },
+        })
+        const options = Array.from(principalSelect().options)
+            .map((option) => option.textContent)
+        expect(options).toContain('My Media')
+        expect(options).toContain('Marketing Team')
+    })
+
+    it('falls back to the group id when the group name is not known', () => {
+        mountDialog()
+        const options = Array.from(principalSelect().options)
+            .map((option) => option.textContent)
+        expect(options).toContain('Group #202')
     })
 
     it('emits close when the dialog is cancelled', async () => {

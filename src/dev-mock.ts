@@ -285,6 +285,18 @@ export function createMockApi(): PluginHostContext['api'] {
             if (path === '/principals/me') {
                 return { principals: [PRINCIPAL_FIXTURE, GROUP_PRINCIPAL_FIXTURE] } as unknown as T
             }
+            if (path === '/groups') {
+                // The friendly name of the group the sandbox acts as. The
+                // panel keys it by the group's *principal* id, and falls
+                // back to `Group #N` without it.
+                return {
+                    groups: [{
+                        id: GROUP_PRINCIPAL_FIXTURE.group_id ?? 0,
+                        name: 'Marketing Team',
+                        principal_id: GROUP_PRINCIPAL_FIXTURE.id,
+                    }],
+                } as unknown as T
+            }
             if (path.startsWith('/media/folders')) {
                 const principalId = Number(/principal_id=(\d+)/.exec(path)?.[1])
                 return { folders: folders[principalId] ?? [] } as unknown as T

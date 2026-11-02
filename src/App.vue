@@ -828,6 +828,7 @@ onBeforeUnmount(() => {
                 v-if="newFolderOpen"
                 :host-context="hostContext"
                 :principals="visiblePrincipals"
+                :group-labels="groupLabelsByPrincipalId"
                 :folders-by-principal="foldersByPrincipal"
                 :default-principal-id="selectedScope"
                 :default-parent-id="query.folderId ?? null"

@@ -41,7 +41,7 @@ const emit = defineEmits<{
     (event: 'update:modelValue', value: string): void
 }>()
 
-const { open, root, toggle } = useDropdownMenu()
+const { open, root, toggle, close } = useDropdownMenu()
 
 const currentLabel = computed(() => {
     const found = props.options.find((option) => option.value === props.modelValue)
@@ -49,6 +49,9 @@ const currentLabel = computed(() => {
 })
 
 function choose(value: string): void {
+    // The menu closes on the choice: the pick is the answer, and a menu
+    // that stays open over the grid it just changed hides the result.
+    close()
     emit('update:modelValue', value)
 }
 </script>

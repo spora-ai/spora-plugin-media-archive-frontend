@@ -23,6 +23,13 @@ const props = withDefaults(defineProps<{
     hostContext: PluginHostContext
     principals: MediaPrincipal[]
     /**
+     * Map of `groupPrincipalId → groupName`. Group rows come from
+     * `GET /groups`, whose wire shape keys the principal id (not the
+     * group id) — see `GroupDetailResource::toArray()` in spora-core.
+     * A group whose name is not available yet is listed as `Group #N`.
+     */
+    groupLabels?: Record<number, string>
+    /**
      * The folders of every visible principal, by principal id. The
      * picker shows the ones belonging to the chosen principal.
      */
@@ -36,6 +43,7 @@ const props = withDefaults(defineProps<{
      */
     defaultParentId?: string | null
 }>(), {
+    groupLabels: () => ({}),
     foldersByPrincipal: () => ({}),
     defaultPrincipalId: null,
     defaultParentId: null,
@@ -117,7 +125,7 @@ const pathPreview = computed(() => {
 
 function principalLabel(principal: MediaPrincipal): string {
     if (principal.type === 'user') return t('My Media')
-    return t('Group #{id}', { id: principal.id })
+    return props.groupLabels[principal.id] ?? t('Group #{id}', { id: principal.id })
 }
 
 function close(): void {

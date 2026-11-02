@@ -151,6 +151,15 @@ describe('createMockApi', () => {
         expect(result.principals[1]?.type).toBe('group')
     })
 
+    it('answers the groups endpoint so the principals can be named', async () => {
+        // The panel keys a group's friendly name by its principal id, and
+        // falls back to `Group #N` without it.
+        const result = await api.get<{ groups: Array<{ id: number; name: string; principal_id: number }> }>('/groups')
+        expect(result.groups).toHaveLength(1)
+        expect(result.groups[0]?.principal_id).toBe(2)
+        expect(result.groups[0]?.name).toBe('Marketing Team')
+    })
+
     it('returns the folder tree for the folders endpoint, per principal', async () => {
         const mine = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=1')
         expect(mine.folders.length).toBeGreaterThan(0)

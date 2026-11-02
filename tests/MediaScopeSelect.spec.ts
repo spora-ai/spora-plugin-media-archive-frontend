@@ -92,6 +92,16 @@ describe('MediaScopeSelect.vue menu', () => {
         expect(wrapper.emitted('update:scope')?.[0]).toEqual([null])
     })
 
+    it('closes on the choice', async () => {
+        // The pick is the answer: a menu that stays open over the tree
+        // it just changed hides the result.
+        const wrapper = mountSelect()
+        await wrapper.find('[data-testid="media-scope-toggle"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-scope-menu"]').exists()).toBe(true)
+        await wrapper.find('[data-testid="media-scope-option-202"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-scope-menu"]').exists()).toBe(false)
+    })
+
     it('closes on a click outside the control', async () => {
         const wrapper = mountSelect()
         await wrapper.find('[data-testid="media-scope-toggle"]').trigger('click')
