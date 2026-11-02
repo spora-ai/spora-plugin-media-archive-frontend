@@ -20,7 +20,7 @@
  * The component is purely presentational: it emits the chosen scope, the
  * chosen folder, and the request to create one.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Folder, FolderPlus, FolderTree, Users, X } from 'lucide-vue-next'
 import type { MediaPrincipal, ScopedMediaFolder } from '../types'
@@ -42,10 +42,23 @@ const props = withDefaults(defineProps<{
      * library).
      */
     selectedFolderId?: string | null
+    /**
+     * Whether a card is being dragged over the panel. The rows then
+     * read as drop targets.
+     */
+    dragActive?: boolean
+    /**
+     * The message of a refused filing, shown under the heading. The
+     * grid's own error block is for a listing that failed to load, so a
+     * dropped card that the server refused needs its own line.
+     */
+    error?: string | null
 }>(), {
     myMediaLabel: null,
     folders: () => [],
     selectedFolderId: null,
+    dragActive: false,
+    error: null,
 })
 
 const emit = defineEmits<{
@@ -53,6 +66,11 @@ const emit = defineEmits<{
     (event: 'update:folderId', value: string | null): void
     (event: 'new-folder'): void
     (event: 'close'): void
+    /**
+     * A card was dropped on a folder — the folder id, or `null` for the
+     * tree's root, which takes the asset out of its folder.
+     */
+    (event: 'file-asset', folderId: string | null): void
 }>()
 
 const { t } = useI18n()
@@ -109,6 +127,39 @@ const grouped = computed(() => props.selectedScope === null && props.principals.
 function folderCount(principalId: number): number {
     return props.folders.filter((folder) => folder.principal_id === principalId).length
 }
+
+/**
+ * The row the pointer is over, so it can say so.
+ *
+ * The drag itself is the browser's: the card sets the asset id as the
+ * drag data, and a row that cancels `dragover` is what makes the drop
+ * land there.
+ */
+const dropTargetId = ref<string | null>(null)
+
+function onDragOver(event: DragEvent, folderId: string | null): void {
+    // Cancelling `dragover` is what tells the browser the row accepts
+    // the drop.
+    event.preventDefault()
+    if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move'
+    }
+    if (dropTargetId.value !== folderId) {
+        dropTargetId.value = folderId
+    }
+}
+
+function onDragLeave(folderId: string | null): void {
+    if (dropTargetId.value === folderId) {
+        dropTargetId.value = null
+    }
+}
+
+function onDrop(event: DragEvent, folderId: string | null): void {
+    event.preventDefault()
+    dropTargetId.value = null
+    emit('file-asset', folderId)
+}
 </script>
 
 <template>
@@ -150,7 +201,18 @@ function folderCount(principalId: number): number {
             </button>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto">
+        <p
+            v-if="error !== null"
+            class="pb-2 text-[11px] text-destructive"
+            data-testid="media-rail-error"
+        >
+            {{ error }}
+        </p>
+
+        <div
+            class="min-h-0 flex-1 overflow-y-auto"
+            :class="dragActive ? 'rounded-lg ring-1 ring-dashed ring-primary/40' : ''"
+        >
             <button
                 type="button"
                 class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
@@ -158,6 +220,9 @@ function folderCount(principalId: number): number {
                 :aria-pressed="selectedFolderId === null"
                 data-testid="media-folder-root"
                 @click="emit('update:folderId', null)"
+                @dragover="onDragOver($event, null)"
+                @dragleave="onDragLeave(null)"
+                @drop="onDrop($event, null)"
             >
                 <FolderTree
                     class="h-3.5 w-3.5 shrink-0"
@@ -195,12 +260,18 @@ function folderCount(principalId: number): number {
                     :key="row.folder.id"
                     type="button"
                     class="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-sm transition-colors hover:bg-muted"
-                    :class="selectedFolderId === row.folder.id ? 'bg-muted font-medium' : ''"
+                    :class="[
+                        selectedFolderId === row.folder.id ? 'bg-muted font-medium' : '',
+                        dropTargetId === row.folder.id ? 'bg-primary/10 ring-1 ring-primary' : '',
+                    ]"
                     :style="{ paddingLeft: `${0.75 + row.depth * 0.9}rem` }"
                     :aria-pressed="selectedFolderId === row.folder.id"
                     :data-testid="`media-folder-${row.folder.id}`"
                     :data-folder-path="row.folder.path"
                     @click="emit('update:folderId', row.folder.id)"
+                    @dragover="onDragOver($event, row.folder.id)"
+                    @dragleave="onDragLeave(row.folder.id)"
+                    @drop="onDrop($event, row.folder.id)"
                 >
                     <Folder
                         class="h-3.5 w-3.5 shrink-0"

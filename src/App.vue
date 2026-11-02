@@ -172,6 +172,19 @@ const railOpen = ref(false)
  */
 const newFolderOpen = ref(false)
 
+/**
+ * The card being dragged, if any. The rail's folder rows are the drop
+ * targets, so the panel has to know what is being dragged.
+ */
+const draggedAsset = ref<MediaAsset | null>(null)
+
+/**
+ * The message of a refused filing. It belongs to the rail — the grid's
+ * error block is for a listing that failed to load, and a dropped card
+ * that the server refused is not that.
+ */
+const filingError = ref<string | null>(null)
+
 const activeAssetId = computed(() => extractAssetId(routePath.value))
 const isOnDetailPage = computed(() => activeAssetId.value !== null)
 
@@ -572,6 +585,60 @@ function onFolderCreated(payload: { folder: MediaFolder; principalId: number }):
     setFolder(payload.folder.id)
 }
 
+/**
+ * A card was dropped on a folder: file it there.
+ *
+ * The server scopes the write by the asset's principal and refuses a
+ * folder of another one with a 422, so the rail only offers the folders
+ * of the principal in scope — but a drop can still land on the wrong
+ * one, and the refusal is the server's to make.
+ */
+async function onFileAsset(folderId: string | null): Promise<void> {
+    const asset = draggedAsset.value
+    draggedAsset.value = null
+    if (asset === null) {
+        return
+    }
+    const from = asset.folder_id ?? null
+    if (from === folderId) {
+        return
+    }
+    filingError.value = null
+    try {
+        const updated = await api.value.patch<MediaAsset>(`/media/${asset.id}`, {
+            folder_id: folderId,
+        })
+        if (updated) {
+            assets.value = assets.value.map((row) => (row.id === asset.id ? updated : row))
+        }
+        adjustFolderCounts(from, folderId)
+    } catch {
+        // The server's wording is about a folder or a filename; the
+        // operator dropped a card, so the message is about the drop.
+        filingError.value = t('The asset could not be filed into that folder.')
+    }
+}
+
+/**
+ * Keep the rail's counts honest after a filing: the asset left one
+ * folder and entered another.
+ */
+function adjustFolderCounts(from: string | null, to: string | null): void {
+    const next: Record<number, MediaFolder[]> = {}
+    for (const [principalId, list] of Object.entries(foldersByPrincipal.value)) {
+        next[Number(principalId)] = list.map((folder) => {
+            if (folder.id === from) {
+                return { ...folder, asset_count: Math.max(0, folder.asset_count - 1) }
+            }
+            if (folder.id === to) {
+                return { ...folder, asset_count: folder.asset_count + 1 }
+            }
+            return folder
+        })
+    }
+    foldersByPrincipal.value = next
+}
+
 function setKind(kind: MediaAssetKind | ''): void {
     query.value = { ...query.value, kind, page: 1 }
     void load()
@@ -755,10 +822,13 @@ onBeforeUnmount(() => {
                         :group-labels="groupLabelsByPrincipalId"
                         :folders="scopedFolders"
                         :selected-folder-id="query.folderId ?? null"
+                        :drag-active="draggedAsset !== null"
+                        :error="filingError"
                         @update:scope="setScope"
                         @update:folder-id="onFolderPicked"
                         @new-folder="newFolderOpen = true"
                         @close="railOpen = false"
+                        @file-asset="onFileAsset"
                     />
                 </aside>
 
@@ -791,6 +861,8 @@ onBeforeUnmount(() => {
                             :folder-name="selectedFolderName"
                             @select="select"
                             @upload-click="openUploadDialog"
+                            @drag-start="draggedAsset = $event"
+                            @drag-end="draggedAsset = null"
                         />
                         <div
                             v-if="assets.length > 0 && (canLoadMore || loadingMore || appendError)"

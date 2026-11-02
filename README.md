@@ -123,6 +123,20 @@ shape, because both are the operator's dialog:
 - `POST /media/folders` answers 422 `NOT_UNIQUE` for a sibling name that
   is taken, and the dialog says so in the operator's words.
 
+### Filing an asset into a folder
+
+Two ways, both making the same `PATCH /media/{id}` with a `folder_id`:
+
+- **The detail page** — a picker beside the kind, offering the folders of
+  the asset's own principal.
+- **Drag and drop** — a card is dragged out of the grid onto a folder row
+  in the rail, and the row lights up under the pointer. Dropping on
+  **All media** takes the asset out of its folder. The write is scoped by
+  the asset's principal, so a folder of another principal is refused.
+
+HTML drag and drop needs a mouse; on a touch screen the detail page's
+picker is the way.
+
 ### Kind filter
 
 An `asset / template / example` dropdown in the toolbar, plus an

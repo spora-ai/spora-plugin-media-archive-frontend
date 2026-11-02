@@ -166,6 +166,30 @@ describe('MediaDetailPage', () => {
         expect(wrapper.emitted('deleted')?.[0]?.[0]).toBe(sample.id)
     })
 
+    it('centres the delete dialog explicitly', async () => {
+        // A native `<dialog>` is centred by the browser's own
+        // `margin: auto`, and the host's preflight resets `margin: 0` on
+        // every element — so the dialog would stick to the upper left
+        // corner. The centring has to be in the markup.
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        const dialog = wrapper.find('[data-testid="delete-confirm-dialog"]')
+        expect(dialog.classes()).toContain('m-0')
+        expect(dialog.classes()).toContain('bg-transparent')
+        expect(dialog.classes()).not.toContain('backdrop:bg-foreground/40')
+
+        const backdrop = wrapper.find('[data-testid="delete-confirm-backdrop"]')
+        expect(backdrop.classes()).toContain('fixed')
+        expect(backdrop.classes()).toContain('inset-0')
+        expect(backdrop.classes()).toContain('items-center')
+        expect(backdrop.classes()).toContain('justify-center')
+    })
+
     it('falls back to a synthesized download name when filename is null', async () => {
         const get = vi.fn().mockResolvedValueOnce({ ...sample, filename: null })
         const { hostContext } = buildHostContext(get)

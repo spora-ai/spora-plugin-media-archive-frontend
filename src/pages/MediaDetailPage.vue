@@ -1382,37 +1382,52 @@ onBeforeUnmount(() => {
             </video>
         </dialog>
 
-        <!-- Delete confirm dialog -->
+        <!--
+          Delete confirm dialog.
+
+          The centring is explicit: a native `<dialog>` is centred by the
+          browser's own `margin: auto`, and the host's preflight resets
+          `margin: 0` on every element — so without this the dialog
+          sticks to the upper left corner. The same shape as the upload
+          dialog: a stripped `<dialog>` around a fixed, centred backdrop.
+        -->
         <dialog
             v-if="asset"
             ref="deleteDialogRef"
-            class="rounded-lg p-6 backdrop:bg-foreground/40"
+            class="m-0 border-0 bg-transparent p-0"
             aria-labelledby="delete-title"
             aria-describedby="delete-desc"
             data-testid="delete-confirm-dialog"
             @cancel.prevent="closeDeleteDialog"
         >
-            <h2 id="delete-title" class="text-base font-semibold">{{ t('Delete asset?') }}</h2>
-            <p id="delete-desc" class="mt-2 text-sm text-muted-foreground">
-                {{ t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') }) }}
-            </p>
-            <div class="mt-4 flex justify-end gap-2">
-                <button
-                    type="button"
-                    class="rounded px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
-                    data-testid="delete-cancel"
-                    @click="closeDeleteDialog"
-                >
-                    {{ t('Cancel') }}
-                </button>
-                <button
-                    type="button"
-                    class="rounded bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
-                    data-testid="delete-confirm"
-                    @click="confirmDelete"
-                >
-                    {{ t('Delete') }}
-                </button>
+            <div
+                class="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4"
+                data-testid="delete-confirm-backdrop"
+            >
+                <div class="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-2xl">
+                    <h2 id="delete-title" class="text-base font-semibold">{{ t('Delete asset?') }}</h2>
+                    <p id="delete-desc" class="mt-2 text-sm text-muted-foreground">
+                        {{ t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') }) }}
+                    </p>
+                    <div class="mt-4 flex justify-end gap-2">
+                        <button
+                            type="button"
+                            class="rounded px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                            data-testid="delete-cancel"
+                            @click="closeDeleteDialog"
+                        >
+                            {{ t('Cancel') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+                            data-testid="delete-confirm"
+                            @click="confirmDelete"
+                        >
+                            {{ t('Delete') }}
+                        </button>
+                    </div>
+                </div>
             </div>
         </dialog>
 

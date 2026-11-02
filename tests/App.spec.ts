@@ -1206,6 +1206,76 @@ describe('App.vue arrangement', () => {
         expect(wrapper.find('[data-testid="media-new-folder-dialog"]').exists()).toBe(true)
     })
 
+    it('files a dragged card into the folder it was dropped on', async () => {
+        // The rail's folder rows are the drop targets: the operator
+        // drags a card out of the grid and onto a folder.
+        const get = vi.fn().mockImplementation((path: string) => {
+            if (path === '/principals/me') {
+                return Promise.resolve({ principals: defaultPrincipals })
+            }
+            if (path === '/groups') {
+                return Promise.resolve({ groups: defaultGroups })
+            }
+            if (path.startsWith('/media/folders')) {
+                return Promise.resolve({ folders: defaultFolders })
+            }
+            return Promise.resolve({
+                assets: [{ id: 'asset-1', filename: 'shot.png', folder_id: null, kind: 'asset' }],
+                page: 1,
+                perPage: 24,
+                total: 1,
+                lastPage: 1,
+            })
+        })
+        const helper = buildContext(get)
+        const patch = helper.api.patch as unknown as ReturnType<typeof vi.fn>
+        patch.mockResolvedValue({ id: 'asset-1', filename: 'shot.png', folder_id: 'folder-1', kind: 'asset' })
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('dragstart')
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('dragover')
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('drop')
+        await flushPromises()
+
+        expect(patch).toHaveBeenCalledWith('/media/asset-1', { folder_id: 'folder-1' })
+    })
+
+    it('takes a dragged card out of its folder when it is dropped on the root', async () => {
+        const get = vi.fn().mockImplementation((path: string) => {
+            if (path === '/principals/me') {
+                return Promise.resolve({ principals: defaultPrincipals })
+            }
+            if (path === '/groups') {
+                return Promise.resolve({ groups: defaultGroups })
+            }
+            if (path.startsWith('/media/folders')) {
+                return Promise.resolve({ folders: defaultFolders })
+            }
+            return Promise.resolve({
+                assets: [{ id: 'asset-1', filename: 'shot.png', folder_id: 'folder-1', kind: 'asset' }],
+                page: 1,
+                perPage: 24,
+                total: 1,
+                lastPage: 1,
+            })
+        })
+        const helper = buildContext(get)
+        const patch = helper.api.patch as unknown as ReturnType<typeof vi.fn>
+        patch.mockResolvedValue({ id: 'asset-1', filename: 'shot.png', folder_id: null, kind: 'asset' })
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('dragstart')
+        await wrapper.find('[data-testid="media-folder-root"]').trigger('dragover')
+        await wrapper.find('[data-testid="media-folder-root"]').trigger('drop')
+        await flushPromises()
+
+        expect(patch).toHaveBeenCalledWith('/media/asset-1', { folder_id: null })
+    })
+
     it('files a created folder under its principal and selects it', async () => {
         const get = vi.fn().mockResolvedValue(emptyList)
         const helper = buildContext(get)

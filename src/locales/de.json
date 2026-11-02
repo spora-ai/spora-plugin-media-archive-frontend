@@ -107,6 +107,7 @@
   "Task": "Aufgabe",
   "Template": "Vorlage",
   "Temporary": "Temporär",
+  "The asset could not be filed into that folder.": "Die Datei konnte nicht in diesen Ordner gelegt werden.",
   "The folder could not be created.": "Der Ordner konnte nicht angelegt werden.",
   "The folder will be {path}.": "Der Ordner wird {path} heißen.",
   "This asset": "Diese Datei",

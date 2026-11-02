@@ -28,6 +28,8 @@ const { t } = useI18n()
 const emit = defineEmits<{
     (event: 'select', asset: MediaAsset): void
     (event: 'upload-click'): void
+    (event: 'drag-start', asset: MediaAsset): void
+    (event: 'drag-end'): void
 }>()
 
 const folderById = computed(() => {
@@ -68,6 +70,8 @@ const folderById = computed(() => {
             :asset="asset"
             :folder="asset.folder_id ? folderById.get(asset.folder_id) ?? null : null"
             @click="emit('select', asset)"
+            @drag-start="emit('drag-start', $event)"
+            @drag-end="emit('drag-end')"
         />
     </div>
 </template>

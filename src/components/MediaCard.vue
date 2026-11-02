@@ -14,7 +14,31 @@ const props = defineProps<{
     folder?: MediaFolder | null
 }>()
 
+const emit = defineEmits<{
+    (event: 'select', asset: MediaAsset): void
+    (event: 'upload-click'): void
+    /**
+     * The card is being dragged. The rail's folder rows are the drop
+     * targets, so the panel can file the asset into one.
+     */
+    (event: 'drag-start', asset: MediaAsset): void
+    (event: 'drag-end'): void
+}>()
+
 const { t } = useI18n()
+
+/**
+ * The drag carries the asset's id, so a drop on a folder row knows what
+ * it is filing. The data is also kept on the event, because a drop
+ * outside the panel has to be able to say "nothing was filed".
+ */
+function onDragStart(event: DragEvent): void {
+    if (event.dataTransfer) {
+        event.dataTransfer.setData('text/plain', props.asset.id)
+        event.dataTransfer.effectAllowed = 'move'
+    }
+    emit('drag-start', props.asset)
+}
 
 const isImage = computed(() => props.asset.media_type === 'image')
 const isAudio = computed(() => props.asset.media_type === 'audio')
@@ -76,8 +100,11 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
 <template>
     <button
         type="button"
+        draggable="true"
         class="group flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40 hover:bg-card/80 focus:outline-none focus:ring-2 focus:ring-primary"
         :data-testid="`media-card-${asset.id}`"
+        @dragstart="onDragStart"
+        @dragend="emit('drag-end')"
     >
         <div class="relative aspect-square overflow-hidden rounded-md bg-muted">
             <span
@@ -93,6 +120,7 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
                 :alt="asset.prompt ?? t('Archived')"
                 class="h-full w-full object-contain bg-background"
                 loading="lazy"
+                draggable="false"
             />
             <div v-else class="flex h-full w-full items-center justify-center text-muted-foreground">
                 <FileAudio v-if="isAudio" class="h-10 w-10" />
