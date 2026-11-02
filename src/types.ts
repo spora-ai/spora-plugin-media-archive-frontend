@@ -86,6 +86,13 @@ export type StorageMode = 'local' | 'data_url' | 'external'
 export interface MediaAsset {
     id: string
     user_id?: number | null
+    /**
+     * The principal the asset belongs to — the tenant it is filed under
+     * and the principal whose folders it can be filed into. The server
+     * scopes a folder write by it, so a folder of another principal is
+     * refused.
+     */
+    principal_id?: number | null
     media_type: MediaType
     mime_type: string | null
     byte_size: number | null

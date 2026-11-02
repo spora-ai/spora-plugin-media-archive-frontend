@@ -36,6 +36,9 @@ export const FIXTURE: MockAsset[] = [
     {
         id: 'demo-1',
         user_id: 42,
+        // The principal the asset is filed under: a folder write is
+        // scoped by it, so the detail page's picker needs it.
+        principal_id: 1,
         media_type: 'image',
         mime_type: 'image/png',
         byte_size: 12345,
@@ -61,6 +64,7 @@ export const FIXTURE: MockAsset[] = [
     {
         id: 'demo-2',
         user_id: 42,
+        principal_id: 1,
         media_type: 'audio',
         mime_type: 'audio/mpeg',
         byte_size: 56789,
@@ -84,6 +88,7 @@ export const FIXTURE: MockAsset[] = [
     {
         id: 'demo-3',
         user_id: 99,
+        principal_id: 1,
         media_type: 'image',
         mime_type: 'image/jpeg',
         byte_size: 234567,
@@ -107,6 +112,7 @@ export const FIXTURE: MockAsset[] = [
     {
         id: 'demo-4',
         user_id: 99,
+        principal_id: 1,
         media_type: 'video',
         mime_type: 'video/mp4',
         byte_size: 4567890,
@@ -130,6 +136,7 @@ export const FIXTURE: MockAsset[] = [
     {
         id: 'demo-5',
         user_id: 42,
+        principal_id: 1,
         media_type: 'document',
         mime_type: 'application/pdf',
         byte_size: 89012,
@@ -279,6 +286,9 @@ export function createMockApi(): PluginHostContext['api'] {
         [PRINCIPAL_FIXTURE.id]: [...FOLDER_FIXTURE],
         [GROUP_PRINCIPAL_FIXTURE.id]: [...GROUP_FOLDER_FIXTURE],
     }
+    // A mutable copy of the fixture, so an asset the operator files into
+    // a folder stays there.
+    const assets: MediaAsset[] = FIXTURE.map((asset) => ({ ...asset }))
 
     return {
         async get<T>(path: string): Promise<T> {
@@ -303,13 +313,13 @@ export function createMockApi(): PluginHostContext['api'] {
             }
             if (path.startsWith('/media/') && path !== '/media') {
                 const id = path.slice('/media/'.length).split('?')[0]
-                const found = FIXTURE.find((m) => m.id === id)
+                const found = assets.find((m) => m.id === id)
                 if (!found) throw new Error(`Not found: ${id}`)
                 return found as unknown as T
             }
             if (path.startsWith('/media')) {
                 const query = parseListQuery(path)
-                const filtered = filterFixture(query)
+                const filtered = filterFixture(query, assets)
                 const page = paginate(filtered, query.page, query.perPage)
                 const lastPage = Math.max(1, Math.ceil(filtered.length / query.perPage))
                 // The host's API client unwraps `body.data` before handing
@@ -361,8 +371,28 @@ export function createMockApi(): PluginHostContext['api'] {
         postForm: async (_path: string, _body: FormData) => {
             throw new Error('POST FormData not supported in mock')
         },
-        patch: async () => {
-            throw new Error('PATCH not supported in mock')
+        patch: async <T>(path: string, body: unknown): Promise<T> => {
+            const id = path.slice('/media/'.length).split('?')[0]
+            const found = assets.find((asset) => asset.id === id)
+            if (!found) throw new Error(`Not found: ${id}`)
+            const payload = body as { folder_id?: string | null; kind?: string }
+            if (payload.folder_id !== undefined) {
+                if (payload.folder_id !== null) {
+                    // The server scopes a folder write by the asset's
+                    // principal and refuses a folder of another one.
+                    const owned = folders[found.principal_id ?? 0] ?? []
+                    if (!owned.some((folder) => folder.id === payload.folder_id)) {
+                        throw Object.assign(new Error('Media folder not found.'), {
+                            code: 'UNKNOWN_FOLDER',
+                        })
+                    }
+                }
+                found.folder_id = payload.folder_id
+            }
+            if (payload.kind !== undefined) {
+                found.kind = payload.kind as MediaAsset['kind']
+            }
+            return found as unknown as T
         },
         delete: async () => {
             throw new Error('DELETE not supported in mock')

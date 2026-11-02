@@ -210,10 +210,22 @@ describe('createMockApi', () => {
         expect(result.total).toBe(result.assets.length)
     })
 
-    it('rejects write verbs', async () => {
+    it('rejects write verbs it does not model', async () => {
         await expect(api.post('/media', {})).rejects.toThrow()
-        await expect(api.patch('/media/demo-1', {})).rejects.toThrow()
         await expect(api.delete('/media/demo-1')).rejects.toThrow()
+    })
+
+    it('files an asset into a folder of its principal', async () => {
+        const filed = await api.patch<MediaAsset>('/media/demo-1', {
+            folder_id: 'folder-templates',
+        })
+        expect(filed.folder_id).toBe('folder-templates')
+        const listed = await api.get<MediaListResponse>('/media?folder_id=folder-templates')
+        expect(listed.assets.some((asset) => asset.id === 'demo-1')).toBe(true)
+    })
+
+    it('refuses a folder of another principal, as the server does', async () => {
+        await expect(api.patch('/media/demo-1', { folder_id: 'folder-shared' })).rejects.toThrow()
     })
 
     it('throws for unknown paths', async () => {

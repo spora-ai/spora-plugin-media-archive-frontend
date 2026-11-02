@@ -13,7 +13,7 @@ Pre-built Vue SPA for the Spora **Media Archive** admin panel. Delivered as a Co
 The detail drawer (right-side panel that opens when a card is selected) covers the operational lifecycle of a media asset:
 
 - Inline rename of the filename, tags, and prompt via accessible `<form>` edit patterns (click-to-edit, Esc/Cancel reverts).
-- The asset's folder (read-only — the folder list is the operator's to curate) and its kind (editable: the mark is the operator's, per the plan's decision D2).
+- The asset's folder and its kind, both editable: a `<select>` beside each other, one that PATCHes `{"folder_id": …}` and one that PATCHes `{"kind": …}`. The folder picker offers the folders of the **asset's** principal — the server scopes a folder write by it and refuses a folder of another principal, so offering them would be offering a refusal.
 - Public-share toggle, copy-URL, and token rotation — all routed through the host's typed API client (`hostContext.api`) so CSRF, base URL, and envelope unwrap are handled centrally.
 - Delete confirmation via a real `<dialog>` element (replaces the old `window.confirm`) with a focus-trapped Cancel/Delete pair.
 - Lightbox preview for image and video assets with `aria-modal="true"`, save-and-restore focus on close, and `Escape` / click-outside dismissal.

@@ -269,7 +269,7 @@ describe('MediaDetailPage', () => {
     })
 
     it('shows the name of the folder the asset is filed in', async () => {
-        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: 'folder-1' })
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: 'folder-1', principal_id: 7 })
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, {
             props: {
@@ -278,9 +278,16 @@ describe('MediaDetailPage', () => {
                 folders: [
                     { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
                 ],
+                foldersByPrincipal: {
+                    7: [
+                        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                    ],
+                },
             },
         })
         await flushPromises()
+        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
+        expect((select.element as HTMLSelectElement).value).toBe('folder-1')
         expect(wrapper.find('[data-testid="media-detail-folder"]').text()).toContain('Corporate')
     })
 
@@ -306,7 +313,7 @@ describe('MediaDetailPage', () => {
         // The asset's principal is not among the visible ones (the asset
         // was opened directly by URL), or that principal's folders failed
         // to load. The asset IS filed in a folder, so "No folder" would
-        // be a false claim.
+        // be a false claim — the picker says so instead.
         const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: 'folder-x' })
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, {
@@ -319,9 +326,12 @@ describe('MediaDetailPage', () => {
             },
         })
         await flushPromises()
-        const folder = wrapper.find('[data-testid="media-detail-folder"]').text()
-        expect(folder).toContain('Unknown folder')
-        expect(folder).not.toContain('No folder')
+        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
+        const options = Array.from((select.element as HTMLSelectElement).options)
+        const unknown = options.find((option) => option.value === 'folder-x')
+        expect(unknown?.textContent).toContain('Unknown folder')
+        expect(unknown?.disabled).toBe(true)
+        expect((select.element as HTMLSelectElement).value).toBe('folder-x')
     })
 
     it('saves a changed kind', async () => {
@@ -336,6 +346,82 @@ describe('MediaDetailPage', () => {
         await flushPromises()
         expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { kind: 'template' })
         expect(wrapper.emitted('updated')?.[0]?.[0]).toMatchObject({ kind: 'template' })
+    })
+
+    it('files the asset into the chosen folder', async () => {
+        // The operator's file cabinet: an asset is moved into a folder
+        // the server scopes by the asset's principal.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: null, principal_id: 7 })
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockResolvedValue({ ...sample, folder_id: 'folder-2', principal_id: 7 })
+        const wrapper = mount(MediaDetailPage, {
+            props: {
+                assetId: sample.id,
+                hostContext,
+                foldersByPrincipal: {
+                    7: [
+                        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                        { id: 'folder-2', name: 'Templates', path: '/Corporate/Templates', parent_id: 'folder-1', asset_count: 1 },
+                    ],
+                },
+            },
+        })
+        await flushPromises()
+        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
+        ;(select.element as HTMLSelectElement).value = 'folder-2'
+        await select.trigger('change')
+        await flushPromises()
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { folder_id: 'folder-2' })
+        expect(wrapper.emitted('updated')?.[0]?.[0]).toMatchObject({ folder_id: 'folder-2' })
+    })
+
+    it('takes the asset out of its folder', async () => {
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: 'folder-1', principal_id: 7 })
+        const { hostContext, api } = buildHostContext(get)
+        api.patch.mockResolvedValue({ ...sample, folder_id: null, principal_id: 7 })
+        const wrapper = mount(MediaDetailPage, {
+            props: {
+                assetId: sample.id,
+                hostContext,
+                foldersByPrincipal: {
+                    7: [
+                        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                    ],
+                },
+            },
+        })
+        await flushPromises()
+        const select = wrapper.find('[data-testid="media-detail-folder-select"]')
+        ;(select.element as HTMLSelectElement).value = ''
+        await select.trigger('change')
+        await flushPromises()
+        expect(api.patch).toHaveBeenCalledWith(`/media/${sample.id}`, { folder_id: null })
+    })
+
+    it('offers only the folders of the asset\'s principal', async () => {
+        // The server refuses a folder of another principal, so offering
+        // them would be offering a refusal.
+        const get = vi.fn().mockResolvedValueOnce({ ...sample, folder_id: null, principal_id: 7 })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, {
+            props: {
+                assetId: sample.id,
+                hostContext,
+                foldersByPrincipal: {
+                    7: [
+                        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+                    ],
+                    8: [
+                        { id: 'folder-9', name: 'Someone else', path: '/Someone else', parent_id: null, asset_count: 0 },
+                    ],
+                },
+            },
+        })
+        await flushPromises()
+        const options = Array.from(
+            (wrapper.find('[data-testid="media-detail-folder-select"]').element as HTMLSelectElement).options,
+        ).map((option) => option.value)
+        expect(options).toEqual(['', 'folder-1'])
     })
 
     it('keeps the mark when the save is rejected', async () => {
