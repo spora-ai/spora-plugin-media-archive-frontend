@@ -371,10 +371,10 @@ export function createMockApi(): PluginHostContext['api'] {
         postForm: async (_path: string, _body: FormData) => {
             throw new Error('POST FormData not supported in mock')
         },
-        patch: async <T>(path: string, body: unknown): Promise<T> => {
+        patch: <T>(path: string, body: unknown): Promise<T> => {
             const id = path.slice('/media/'.length).split('?')[0]
             const found = assets.find((asset) => asset.id === id)
-            if (!found) throw new Error(`Not found: ${id}`)
+            if (!found) return Promise.reject(new Error(`Not found: ${id}`))
             const payload = body as { folder_id?: string | null; kind?: string }
             if (payload.folder_id !== undefined) {
                 if (payload.folder_id !== null) {
@@ -382,9 +382,9 @@ export function createMockApi(): PluginHostContext['api'] {
                     // principal and refuses a folder of another one.
                     const owned = folders[found.principal_id ?? 0] ?? []
                     if (!owned.some((folder) => folder.id === payload.folder_id)) {
-                        throw Object.assign(new Error('Media folder not found.'), {
+                        return Promise.reject(Object.assign(new Error('Media folder not found.'), {
                             code: 'UNKNOWN_FOLDER',
-                        })
+                        }))
                     }
                 }
                 found.folder_id = payload.folder_id
@@ -392,7 +392,7 @@ export function createMockApi(): PluginHostContext['api'] {
             if (payload.kind !== undefined) {
                 found.kind = payload.kind as MediaAsset['kind']
             }
-            return found as unknown as T
+            return Promise.resolve(found as unknown as T)
         },
         delete: async () => {
             throw new Error('DELETE not supported in mock')
