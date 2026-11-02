@@ -139,13 +139,25 @@ unfiltered state:
 The plugin ships **no preflight** — the host owns the document-level
 resets — and Tailwind v3 emits its `--tw-translate-x`, `--tw-rotate`,
 `--tw-scale-x` defaults in the same base rule as its preflight. A
-transform utility reads them, so without the defaults the `transform`
-declaration is invalid at computed-value time and the element keeps
-`transform: none` — the utility silently does nothing.
+transform utility reads them:
 
-`src/style.css` therefore carries those defaults itself, scoped to
-`#spora-plugin-media-archive`. The host's Tailwind v4 does not define
-them either, so the plugin cannot borrow them from there.
+```css
+.-translate-x-full {
+  --tw-translate-x: -100%;
+  transform: translate(var(--tw-translate-x), var(--tw-translate-y))
+             rotate(var(--tw-rotate)) …;
+}
+```
+
+Without the defaults the declaration references variables that do not
+exist, so it is invalid at computed-value time and the element keeps
+`transform: none` — the utility silently does nothing. The host's
+Tailwind v4 does not define them either, so there is nothing to borrow.
+
+The panel therefore avoids transform utilities altogether: centring is
+`inset-y-0 my-auto`, and the drawer slides on `left`. That is why the
+search icon sits centred in its field instead of half a line off, and why
+the drawer goes off-screen on a narrow one.
 
 ## Upload
 

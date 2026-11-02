@@ -97,7 +97,14 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
 <template>
     <div class="flex flex-wrap items-center gap-2">
         <div class="relative order-first w-full sm:order-none sm:w-auto sm:min-w-[12rem] sm:flex-1">
-            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <!--
+              Centred with `inset-y-0 my-auto` rather than
+              `top-1/2 -translate-y-1/2`: the plugin ships no preflight, and
+              Tailwind's transform utilities read variables its preflight
+              defines — without them they silently do nothing. See
+              `src/style.css`.
+            -->
+            <Search class="pointer-events-none absolute left-3 inset-y-0 my-auto h-4 w-4 text-muted-foreground" />
             <input
                 type="search"
                 :value="search"

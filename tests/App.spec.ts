@@ -1153,7 +1153,8 @@ describe('App.vue arrangement', () => {
         expect(wrapper.find('[data-testid="media-grid-empty"]').text()).toContain('This folder is empty.')
     })
 
-    it('opens the folder drawer from the toolbar and closes it on the backdrop', async () => {        const get = vi.fn().mockResolvedValue(emptyList)
+    it('opens the folder drawer from the toolbar and closes it on the backdrop', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
         const helper = buildContext(get)
         const wrapper = mount(App, { props: { hostContext: helper } })
         await flushPromises()
@@ -1165,6 +1166,31 @@ describe('App.vue arrangement', () => {
 
         await wrapper.find('[data-testid="media-rail-backdrop"]').trigger('click')
         expect(wrapper.find('[data-testid="media-rail-backdrop"]').exists()).toBe(false)
+    })
+
+    it('keeps the closed rail off-canvas', async () => {
+        // The rail slides on `left`, not on a transform: the plugin ships
+        // no preflight, and Tailwind's transform utilities read variables
+        // its preflight defines — without them they silently do nothing.
+        // The offset must therefore be in the closed state, and the open
+        // state must not carry it: `left-0` and `-left-[18rem]` set the
+        // same property, and the one that comes later in the generated
+        // CSS wins.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        const rail = wrapper.find('[data-testid="media-folder-rail"]')
+        expect(rail.classes()).toContain('-left-[18rem]')
+        expect(rail.classes()).toContain('invisible')
+        expect(rail.classes()).not.toContain('left-0')
+
+        await wrapper.find('[data-testid="media-rail-open"]').trigger('click')
+        const open = wrapper.find('[data-testid="media-folder-rail"]')
+        expect(open.classes()).toContain('left-0')
+        expect(open.classes()).not.toContain('-left-[18rem]')
     })
 
     it('opens the new-folder dialog from the rail', async () => {

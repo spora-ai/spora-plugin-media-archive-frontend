@@ -743,10 +743,10 @@ onBeforeUnmount(() => {
                 -->
                 <aside
                     v-if="foldersSupported"
-                    class="fixed inset-y-0 left-0 z-50 w-72 overflow-y-auto border-r border-border bg-background p-4 transition-transform lg:static lg:z-auto lg:w-64 lg:shrink-0 lg:overflow-visible lg:border-r-0 lg:bg-transparent lg:p-0 lg:pr-6"
+                    class="fixed inset-y-0 z-50 w-72 overflow-y-auto border-r border-border bg-background p-4 transition-[left,visibility] duration-200 lg:static lg:z-auto lg:w-64 lg:shrink-0 lg:overflow-visible lg:border-r-0 lg:bg-transparent lg:p-0 lg:pr-6 lg:transition-none"
                     :class="railOpen
-                        ? 'translate-x-0 visible'
-                        : '-translate-x-full invisible lg:translate-x-0 lg:visible'"
+                        ? 'left-0 visible'
+                        : '-left-[18rem] invisible lg:visible'"
                     data-testid="media-folder-rail"
                 >
                     <MediaFolderRail

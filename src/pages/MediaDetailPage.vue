@@ -1420,7 +1420,7 @@ onBeforeUnmount(() => {
         <output
             v-if="toast"
             aria-live="polite"
-            class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg"
+            class="pointer-events-none fixed inset-x-0 bottom-6 z-50 mx-auto w-fit rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg"
             data-testid="media-toast"
         >
             {{ toast }}
