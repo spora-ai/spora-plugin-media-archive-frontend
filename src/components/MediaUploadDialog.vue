@@ -48,6 +48,12 @@ interface Props {
      */
     defaultPrincipalId: number | null
     /**
+     * The folder the panel is scoped to, if any. The upload lands in it
+     * — the operator is looking at that folder, so that is where the
+     * file belongs.
+     */
+    defaultFolderId?: string | null
+    /**
      * The folders of the visible principals, keyed by principal id.
      * The picker offers the folders of the selected principal, so the
      * upload is filed into a folder of the principal it lands in —
@@ -57,6 +63,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+    defaultFolderId: null,
     foldersByPrincipal: () => ({}),
 })
 
@@ -137,6 +144,27 @@ function resolveInitialPrincipal(): number | null {
     return props.principals[0]?.id ?? null
 }
 
+/**
+ * The folder the upload lands in, or `''` for the root.
+ *
+ * The panel's folder is the operator's context, so an upload belongs in
+ * it. A folder of another principal cannot be used — the server refuses
+ * it — so the default only applies when the principal the upload is
+ * filed under owns it.
+ */
+function resolveInitialFolder(): string {
+    const folder = props.defaultFolderId
+    if (folder === null || folder === '') {
+        return ''
+    }
+    const principal = principalId.value
+    if (principal === null) {
+        return ''
+    }
+    const owned = props.foldersByPrincipal[principal] ?? []
+    return owned.some((candidate) => candidate.id === folder) ? folder : ''
+}
+
 async function loadAllowedTypes(): Promise<void> {
     try {
         const response = await props.hostContext.api.get<AllowedTypes>(
@@ -162,7 +190,7 @@ function open(): void {
     prompt.value = ''
     tags.value = ''
     principalId.value = resolveInitialPrincipal()
-    folderId.value = ''
+    folderId.value = resolveInitialFolder()
     void loadAllowedTypes()
     dialogRef.value?.showModal()
 }
@@ -272,9 +300,10 @@ watch(() => props.principals, () => {
 
 // The chosen folder belongs to a principal; changing the principal
 // invalidates it, and a folder of another principal is refused by the
-// server.
+// server. The panel's folder comes back when the new principal owns
+// it — the operator is still in that folder.
 watch(principalId, () => {
-    folderId.value = ''
+    folderId.value = resolveInitialFolder()
 })
 
 onBeforeUnmount(() => {

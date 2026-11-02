@@ -841,6 +841,7 @@ onBeforeUnmount(() => {
                 :principals="visiblePrincipals"
                 :group-labels="groupLabelsByPrincipalId"
                 :default-principal-id="selectedScope"
+                :default-folder-id="query.folderId ?? null"
                 :folders-by-principal="foldersByPrincipal"
                 @uploaded="onUploaded"
                 @close="uploadDialogOpen = false"

@@ -420,8 +420,50 @@ describe('MediaUploadDialog', () => {
         wrapper.unmount()
     })
 
-    it('sends no folder when the unfiled option is picked', async () => {
+    it('lands the upload in the folder the panel is scoped to', async () => {
+        // The operator is looking at a folder, so that is where the file
+        // belongs — the panel's folder is the upload's default.
         const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: { ...dialogProps(harness, 101), defaultFolderId: 'folder-2' },
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        expect(folderSelect().value).toBe('folder-2')
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBe('folder-2')
+        wrapper.unmount()
+    })
+
+    it('drops the panel folder when another principal owns it', async () => {
+        // The upload is filed under a principal the server would refuse
+        // the folder for, so the default cannot apply.
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: { ...dialogProps(harness, 202), defaultFolderId: 'folder-1' },
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBeNull()
+        wrapper.unmount()
+    })
+
+    it('sends no folder when the unfiled option is picked', async () => {        const harness = buildHost()
         const wrapper = mount(MediaUploadDialog, {
             props: dialogProps(harness, 101),
             attachTo: document.body,
