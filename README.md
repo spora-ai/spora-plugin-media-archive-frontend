@@ -160,7 +160,11 @@ npm run build   # writes frontend/main.js + frontend/style.css
 npm run smoke   # asserts window.SporaAppMediaArchive.mount is a function
 ```
 
-The build output (`main.js` + `style.css`) is committed to this repo. Operators get the new bundle on the next `composer update`.
+The build output (`main.js` + `style.css`) is **not** committed — it is
+gitignored and built by the release workflow, which packs `frontend/`
+verbatim into the GitHub Release tarball the Composer package points at.
+Operators get the new bundle on the next `composer update`. See
+[RELEASING.md](./RELEASING.md).
 
 ## Dev mode (plugin author)
 
