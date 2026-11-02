@@ -98,7 +98,7 @@ function choose(scope: number | null): void {
             :class="compact
                 ? 'h-8 pl-1.5 pr-2 text-xs font-medium'
                 : 'w-full px-2 py-1.5'"
-            aria-haspopup="listbox"
+            aria-haspopup="true"
             :aria-expanded="open"
             data-testid="media-scope-toggle"
             @click.stop="toggle"
@@ -126,14 +126,14 @@ function choose(scope: number | null): void {
         <div
             v-if="open"
             class="absolute left-0 top-full z-40 mt-1 w-80 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
-            role="listbox"
+            role="menu"
             data-media-menu
             data-testid="media-scope-menu"
         >
             <button
                 type="button"
-                role="option"
-                :aria-selected="selectedScope === null"
+                role="menuitemradio"
+                :aria-checked="selectedScope === null"
                 class="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted"
                 :class="selectedScope === null ? 'bg-muted ring-1 ring-inset ring-border' : ''"
                 data-testid="media-scope-option-all"
@@ -156,8 +156,8 @@ function choose(scope: number | null): void {
                 v-for="principal in principals"
                 :key="principal.id"
                 type="button"
-                role="option"
-                :aria-selected="selectedScope === principal.id"
+                role="menuitemradio"
+                :aria-checked="selectedScope === principal.id"
                 class="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted"
                 :class="selectedScope === principal.id ? 'bg-muted ring-1 ring-inset ring-border' : ''"
                 :data-testid="`media-scope-option-${principal.id}`"

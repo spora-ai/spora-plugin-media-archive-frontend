@@ -316,7 +316,7 @@ export function createMockApi(): PluginHostContext['api'] {
             }
             throw new Error(`Mock API has no handler for ${path}`)
         },
-        async post<T>(path: string, body: unknown): Promise<T> {
+        post<T>(path: string, body: unknown): Promise<T> {
             if (path === '/media/folders') {
                 const payload = body as { name: string; parent_id: string | null; principal_id: number }
                 const list = folders[payload.principal_id] ?? []
@@ -326,13 +326,13 @@ export function createMockApi(): PluginHostContext['api'] {
                 if (payload.parent_id !== null && parent === undefined) {
                     // The server's rule: a parent of another principal is a
                     // 404, not a 403.
-                    throw Object.assign(new Error('Media folder not found.'), { status: 404 })
+                    return Promise.reject(Object.assign(new Error('Media folder not found.'), { status: 404 }))
                 }
                 const path_ = `${parent?.path ?? ''}/${payload.name}`
                 if (list.some((folder) => folder.path === path_ && folder.parent_id === payload.parent_id)) {
-                    throw Object.assign(new Error('A folder with that name already exists here.'), {
+                    return Promise.reject(Object.assign(new Error('A folder with that name already exists here.'), {
                         code: 'NOT_UNIQUE',
-                    })
+                    }))
                 }
                 const folder: MediaFolder = {
                     id: `folder-new-${Date.now()}`,
@@ -342,9 +342,9 @@ export function createMockApi(): PluginHostContext['api'] {
                     asset_count: 0,
                 }
                 folders[payload.principal_id] = [...list, folder]
-                return folder as unknown as T
+                return Promise.resolve(folder as unknown as T)
             }
-            throw new Error('POST not supported in mock')
+            return Promise.reject(new Error('POST not supported in mock'))
         },
         postForm: async (_path: string, _body: FormData) => {
             throw new Error('POST FormData not supported in mock')

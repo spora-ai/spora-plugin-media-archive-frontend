@@ -58,7 +58,7 @@ function choose(value: string): void {
         <button
             type="button"
             class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background pl-2.5 pr-2 text-xs font-medium transition-colors hover:bg-muted/50"
-            aria-haspopup="listbox"
+            aria-haspopup="true"
             :aria-expanded="open"
             :data-testid="testid ? `${testid}-toggle` : undefined"
             @click.stop="toggle"
@@ -70,7 +70,7 @@ function choose(value: string): void {
         <div
             v-if="open"
             class="absolute left-0 top-9 z-40 w-60 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
-            role="listbox"
+            role="menu"
             data-media-menu
             :data-testid="testid ? `${testid}-menu` : undefined"
         >
@@ -78,8 +78,8 @@ function choose(value: string): void {
                 v-for="option in options"
                 :key="option.value"
                 type="button"
-                role="option"
-                :aria-selected="option.value === modelValue"
+                role="menuitemradio"
+                :aria-checked="option.value === modelValue"
                 class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
                 :class="option.value === modelValue ? 'bg-muted ring-1 ring-inset ring-border' : ''"
                 :data-testid="testid ? `${testid}-option-${option.value || 'all'}` : undefined"

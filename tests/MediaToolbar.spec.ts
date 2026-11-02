@@ -57,14 +57,14 @@ describe('MediaToolbar.vue search box', () => {
 })
 
 describe('MediaToolbar.vue type dropdown', () => {
-    it('opens a listbox menu on the toggle', async () => {
+    it('opens a menu on the toggle', async () => {
         const wrapper = mountToolbar()
         expect(wrapper.find('[data-testid="media-type-select-menu"]').exists()).toBe(false)
 
         await wrapper.find('[data-testid="media-type-select-toggle"]').trigger('click')
         const menu = wrapper.find('[data-testid="media-type-select-menu"]')
         expect(menu.exists()).toBe(true)
-        expect(menu.attributes('role')).toBe('listbox')
+        expect(menu.attributes('role')).toBe('menu')
     })
 
     it('offers every media type plus the unfiltered state', async () => {

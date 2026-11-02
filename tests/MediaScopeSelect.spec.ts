@@ -62,7 +62,7 @@ describe('MediaScopeSelect.vue menu', () => {
         await toggle.trigger('click')
         const menu = wrapper.find('[data-testid="media-scope-menu"]')
         expect(menu.exists()).toBe(true)
-        expect(menu.attributes('role')).toBe('listbox')
+        expect(menu.attributes('role')).toBe('menu')
         expect(toggle.attributes('aria-expanded')).toBe('true')
 
         await toggle.trigger('click')
@@ -154,15 +154,15 @@ describe('MediaScopeSelect.vue labels', () => {
     it('marks the selected row as the chosen option', async () => {
         const wrapper = mountSelect({ selectedScope: 202 })
         await wrapper.find('[data-testid="media-scope-toggle"]').trigger('click')
-        expect(wrapper.find('[data-testid="media-scope-option-202"]').attributes('aria-selected')).toBe('true')
-        expect(wrapper.find('[data-testid="media-scope-option-101"]').attributes('aria-selected')).toBe('false')
-        expect(wrapper.find('[data-testid="media-scope-option-all"]').attributes('aria-selected')).toBe('false')
+        expect(wrapper.find('[data-testid="media-scope-option-202"]').attributes('aria-checked')).toBe('true')
+        expect(wrapper.find('[data-testid="media-scope-option-101"]').attributes('aria-checked')).toBe('false')
+        expect(wrapper.find('[data-testid="media-scope-option-all"]').attributes('aria-checked')).toBe('false')
     })
 
     it('marks the ALL row as the chosen option when no principal is selected', async () => {
         const wrapper = mountSelect({ selectedScope: null })
         await wrapper.find('[data-testid="media-scope-toggle"]').trigger('click')
-        expect(wrapper.find('[data-testid="media-scope-option-all"]').attributes('aria-selected')).toBe('true')
+        expect(wrapper.find('[data-testid="media-scope-option-all"]').attributes('aria-checked')).toBe('true')
     })
 
     it('renders the compact copy on one line', async () => {

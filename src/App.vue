@@ -721,10 +721,14 @@ onBeforeUnmount(() => {
                   The rail's backdrop. It exists only while the drawer is
                   open, and only on a narrow screen — on a wide screen the
                   rail is a column beside the grid, not a layer over it.
+                  It is a button, so it can be dismissed from the
+                  keyboard and not only with a pointer.
                 -->
-                <div
+                <button
                     v-if="railOpen"
+                    type="button"
                     class="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+                    :aria-label="t('Close the folders')"
                     data-testid="media-rail-backdrop"
                     @click="railOpen = false"
                 />
