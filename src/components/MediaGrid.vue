@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MediaCard from './MediaCard.vue'
-import type { MediaAsset, MediaFolder } from '../types'
+import type { MediaAsset, MediaFolder, MediaFolderFilter } from '../types'
 
 const props = withDefaults(defineProps<{
     assets?: MediaAsset[] | null
@@ -12,15 +12,27 @@ const props = withDefaults(defineProps<{
      */
     folders?: MediaFolder[] | null
     /**
-     * The name of the folder the listing is scoped to, or `null` for the
-     * whole library. The empty state says which of the two it is: "no
-     * media yet" is wrong for an empty folder in a full archive.
+     * Which slice of the library the listing shows. The empty state
+     * says which one it is: "no media yet" is wrong for an empty
+     * folder in a full archive, and wrong for a filter that found
+     * nothing.
      */
-    folderName?: string | null
+    filter?: MediaFolderFilter
+    /**
+     * Whether the cards are selection targets instead of links to the
+     * detail page.
+     */
+    selectable?: boolean
+    /**
+     * The ids of the selected assets.
+     */
+    selectedIds?: string[]
 }>(), {
     assets: () => [],
     folders: () => [],
-    folderName: null,
+    filter: () => ({ kind: 'all' }),
+    selectable: false,
+    selectedIds: () => [],
 })
 
 const { t } = useI18n()
@@ -30,6 +42,7 @@ const emit = defineEmits<{
     (event: 'upload-click'): void
     (event: 'drag-start', asset: MediaAsset): void
     (event: 'drag-end'): void
+    (event: 'toggle-select', asset: MediaAsset): void
 }>()
 
 const folderById = computed(() => {
@@ -39,6 +52,25 @@ const folderById = computed(() => {
     }
     return map
 })
+
+const selected = computed(() => new Set(props.selectedIds))
+
+/**
+ * What the empty state says.
+ *
+ * The three scopes need three sentences: a library with nothing in it
+ * is not an empty folder, and a filter that found nothing is not an
+ * empty library.
+ */
+const emptyMessage = computed(() => {
+    if (props.filter.kind === 'folder') {
+        return t('This folder is empty.')
+    }
+    if (props.filter.kind === 'unfiled') {
+        return t('Nothing is filed in a folder.')
+    }
+    return t('No media yet — generate something with a companion plugin to see it here.')
+})
 </script>
 
 <template>
@@ -47,9 +79,7 @@ const folderById = computed(() => {
         class="rounded-xl border border-dashed border-border bg-card/50 p-12 text-center text-sm text-muted-foreground"
         data-testid="media-grid-empty"
     >
-        {{ folderName !== null
-            ? t('This folder is empty.')
-            : t('No media yet — generate something with a companion plugin to see it here.') }}
+        {{ emptyMessage }}
         <button
             type="button"
             class="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
@@ -69,7 +99,10 @@ const folderById = computed(() => {
             :key="asset.id"
             :asset="asset"
             :folder="asset.folder_id ? folderById.get(asset.folder_id) ?? null : null"
-            @click="emit('select', asset)"
+            :selectable="selectable"
+            :selected="selected.has(asset.id)"
+            @select="emit('select', asset)"
+            @toggle-select="emit('toggle-select', asset)"
             @drag-start="emit('drag-start', $event)"
             @drag-end="emit('drag-end')"
         />

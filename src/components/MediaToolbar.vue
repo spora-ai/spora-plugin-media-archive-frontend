@@ -16,7 +16,7 @@
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FolderTree, Search, Upload } from 'lucide-vue-next'
+import { FolderTree, CheckSquare, Search, Upload } from 'lucide-vue-next'
 import type { MediaAssetKind, MediaPrincipal, MediaType } from '../types'
 import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 import MediaScopeSelect from './MediaScopeSelect.vue'
@@ -41,10 +41,17 @@ withDefaults(defineProps<{
     selectedScope: number | null
     groupLabels: Record<number, string>
     myMediaLabel?: string | null
+    /**
+     * Whether the panel is in selection mode. The button that turns it
+     * on is hidden while it is on — the selection bar carries the way
+     * out.
+     */
+    selectionMode?: boolean
 }>(), {
     foldersSupported: true,
     showRail: true,
     myMediaLabel: null,
+    selectionMode: false,
 })
 
 const emit = defineEmits<{
@@ -54,6 +61,7 @@ const emit = defineEmits<{
     (event: 'update:scope', value: number | null): void
     (event: 'upload-click'): void
     (event: 'open-folders'): void
+    (event: 'toggle-selection'): void
 }>()
 
 const { t } = useI18n()
@@ -152,6 +160,17 @@ const { showTemporary, toggle: toggleShowTemporary } = useShowTemporaryToggle()
             testid="media-kind-select"
             @update:model-value="emit('update:kind', $event as MediaAssetKind | '')"
         />
+
+        <button
+            v-if="!selectionMode"
+            type="button"
+            class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted/50"
+            data-testid="media-selection-toggle"
+            @click="emit('toggle-selection')"
+        >
+            <CheckSquare class="h-4 w-4" />
+            <span>{{ t('Select') }}</span>
+        </button>
 
         <button
             type="button"

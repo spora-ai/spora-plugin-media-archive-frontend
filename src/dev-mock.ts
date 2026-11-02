@@ -230,6 +230,7 @@ export interface ListQuery {
     plugin: string
     search: string
     folderId: string
+    unfiled: boolean
     kind: string
     scope: Scope
     page: number
@@ -249,6 +250,7 @@ export function parseListQuery(path: string): ListQuery {
         plugin: params.get('plugin_slug') ?? '',
         search: (params.get('q') ?? '').trim().toLowerCase(),
         folderId: params.get('folder_id') ?? '',
+        unfiled: params.get('unfiled') === 'true',
         kind: params.get('kind') ?? '',
         scope,
         page: pageRaw === null ? 1 : Math.max(1, Number(pageRaw) || 1),
@@ -265,6 +267,7 @@ export function filterFixture(query: ListQuery, source: MediaAsset[] = FIXTURE a
         if (query.type && asset.media_type !== query.type) return false
         if (query.plugin && asset.plugin_slug !== query.plugin) return false
         if (query.folderId && asset.folder_id !== query.folderId) return false
+        if (query.unfiled && asset.folder_id !== null && asset.folder_id !== undefined) return false
         if (query.kind && (asset.kind ?? 'asset') !== query.kind) return false
         if (query.search) {
             const haystack = (asset.prompt ?? '').toLowerCase()
@@ -399,8 +402,12 @@ export function createMockApi(): PluginHostContext['api'] {
             // sandbox does too.
             return Promise.resolve({ ...found } as unknown as T)
         },
-        delete: async () => {
-            throw new Error('DELETE not supported in mock')
+        delete: async <T>(path: string): Promise<T> => {
+            const id = path.slice('/media/'.length).split('?')[0]
+            const index = assets.findIndex((asset) => asset.id === id)
+            if (index < 0) throw new Error(`Not found: ${id}`)
+            const [removed] = assets.splice(index, 1)
+            return { deleted: true, id: removed?.id } as unknown as T
         },
     }
 }

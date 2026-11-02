@@ -38,7 +38,7 @@ describe('MediaGrid', () => {
     it('says the folder is empty rather than the archive when a folder is scoped', () => {
         // "No media yet — generate something with a companion plugin" is
         // wrong for an empty folder in a full archive.
-        const wrapper = mount(MediaGrid, { props: { assets: [], folderName: 'Corporate' } })
+        const wrapper = mount(MediaGrid, { props: { assets: [], filter: { kind: 'folder', id: 'folder-1' } } })
         const empty = wrapper.find('[data-testid="media-grid-empty"]')
         expect(empty.exists()).toBe(true)
         expect(empty.text()).toContain('This folder is empty.')

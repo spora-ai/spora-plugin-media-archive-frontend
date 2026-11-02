@@ -21,6 +21,7 @@ import type {
     MediaAsset,
     MediaAssetKind,
     MediaFolder,
+    MediaFolderFilter,
     MediaGroup,
     MediaListQuery,
     MediaListResponse,
@@ -31,8 +32,12 @@ import type {
 import { extractAssetId } from './lib/route-detection'
 import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
 import MediaGrid from './components/MediaGrid.vue'
+import MediaDeleteDialog from './components/MediaDeleteDialog.vue'
 import MediaFolderRail from './components/MediaFolderRail.vue'
+import MediaMoveDialog from './components/MediaMoveDialog.vue'
 import MediaNewFolderDialog from './components/MediaNewFolderDialog.vue'
+import MediaSelectionBar from './components/MediaSelectionBar.vue'
+import MediaToast from './components/MediaToast.vue'
 import MediaToolbar from './components/MediaToolbar.vue'
 import MediaUploadDialog from './components/MediaUploadDialog.vue'
 import MediaDetailPage from './pages/MediaDetailPage.vue'
@@ -70,6 +75,7 @@ const query = ref<MediaListQuery>({
     pluginSlug: '',
     search: '',
     folderId: null,
+    unfiled: false,
     kind: '',
 })
 
@@ -184,6 +190,90 @@ const draggedAsset = ref<MediaAsset | null>(null)
  * that the server refused is not that.
  */
 const filingError = ref<string | null>(null)
+
+/**
+ * The selection mode.
+ *
+ * While it is on, a click on a card adds or removes the asset instead
+ * of opening its detail page, and the panel offers the actions that
+ * work on several assets at once: filing them together, deleting them
+ * together.
+ */
+const selectionMode = ref(false)
+
+/**
+ * The ids of the selected assets. Only the loaded rows can be
+ * selected — the panel holds one page at a time.
+ */
+const selectedIds = ref<string[]>([])
+
+/**
+ * The toast for the panel's own actions. The detail page has its own;
+ * this is the grid's.
+ */
+const toast = ref<string | null>(null)
+
+/**
+ * The bulk dialogs. Both act on the selection, so they are opened from
+ * the selection bar.
+ */
+const moveDialogOpen = ref(false)
+const deleteDialogOpen = ref(false)
+
+/**
+ * Whether a bulk action is running. The dialogs disable their buttons
+ * while it is, so a second click cannot fire the deletion twice.
+ */
+const bulkBusy = ref(false)
+
+const selectedAssets = computed<MediaAsset[]>(() =>
+    assets.value.filter((asset) => selectedIds.value.includes(asset.id)),
+)
+
+function showToast(message: string): void {
+    toast.value = message
+    setTimeout(() => {
+        if (toast.value === message) {
+            toast.value = null
+        }
+    }, 2500)
+}
+
+/**
+ * Add an asset to the selection, or take it out again.
+ */
+function toggleAssetSelection(asset: MediaAsset): void {
+    selectedIds.value = selectedIds.value.includes(asset.id)
+        ? selectedIds.value.filter((id) => id !== asset.id)
+        : [...selectedIds.value, asset.id]
+}
+
+/**
+ * Select every loaded row, or clear the selection when they are all
+ * selected already.
+ */
+function toggleSelectAll(): void {
+    selectedIds.value = selectedIds.value.length === assets.value.length
+        ? []
+        : assets.value.map((asset) => asset.id)
+}
+
+/**
+ * Leave the selection mode. The selection itself goes with it: an
+ * action taken on it is the end of it.
+ */
+function cancelSelection(): void {
+    selectionMode.value = false
+    selectedIds.value = []
+}
+
+/**
+ * Clear the selection without leaving the mode — the listing changed
+ * under it, so the rows it named are not on screen any more.
+ */
+function clearSelection(): void {
+    selectedIds.value = []
+}
 
 const activeAssetId = computed(() => extractAssetId(routePath.value))
 const isOnDetailPage = computed(() => activeAssetId.value !== null)
@@ -315,22 +405,22 @@ const allFolders = computed<MediaFolder[]>(() => {
 })
 
 /**
- * The name of the folder the listing is scoped to, or `null` for the
- * whole library. The grid's empty state says which of the two it is:
- * "no media yet" is wrong for an empty folder in a full archive.
+ * Which slice of the library the listing shows.
+ *
+ * The wire query keeps the two filters apart — a folder id and the
+ * `unfiled` flag — because the server does: `?folder_id=` names one
+ * folder, `?unfiled=true` names the assets in none. The rail, the grid
+ * and the drag-and-drop all work with the one value.
  */
-const selectedFolderName = computed<string | null>(() => {
+const folderFilter = computed<MediaFolderFilter>(() => {
+    if (query.value.unfiled === true) {
+        return { kind: 'unfiled' }
+    }
     const id = query.value.folderId
-    if (id === null || id === undefined || id === '') {
-        return null
+    if (id !== null && id !== undefined && id !== '') {
+        return { kind: 'folder', id }
     }
-    for (const list of Object.values(foldersByPrincipal.value)) {
-        const found = list.find((folder) => folder.id === id)
-        if (found !== undefined) {
-            return found.name
-        }
-    }
-    return null
+    return { kind: 'all' }
 })
 
 /**
@@ -419,6 +509,10 @@ function buildPageParams(page: number): URLSearchParams {
     // a bracket form would be read as "the first of these", which is
     // worse than no folder filter at all.
     if (query.value.folderId) params.set('folder_id', query.value.folderId)
+    // The other half of the folder filter: the assets filed in no
+    // folder. The server ignores it when a folder is named, so only one
+    // of the two is ever sent.
+    if (query.value.unfiled) params.set('unfiled', 'true')
     if (query.value.kind) params.set('kind', query.value.kind)
     for (const id of principalIdsForRequest()) {
         // Use the `principal_id[]` array form so PHP's `parse_str`
@@ -444,6 +538,9 @@ function buildPageParams(page: number): URLSearchParams {
 function reconcileAssets(response: MediaListResponse, mode: LoadMode): void {
     if (mode === 'replace') {
         assets.value = response.assets
+        // The rows the selection named are not on screen any more, so
+        // the selection cannot mean anything.
+        clearSelection()
         return
     }
     const existing = new Set(assets.value.map((a) => a.id))
@@ -551,14 +648,18 @@ function folderIdInScope(scope: SelectedScope, keep: string | null): string | nu
 }
 
 /**
- * The folder filter.
+ * Apply a folder filter.
  *
- * A folder of a principal outside the new scope would filter the
- * listing down to nothing, so the selection is dropped when the scope
- * changes.
+ * The two filters are exclusive on the wire: the server ignores
+ * `unfiled` when a folder is named, so only one of them is ever sent.
  */
-function setFolder(folderId: string | null): void {
-    query.value = { ...query.value, folderId, page: 1 }
+function setFolderFilter(filter: MediaFolderFilter): void {
+    query.value = {
+        ...query.value,
+        folderId: filter.kind === 'folder' ? filter.id : null,
+        unfiled: filter.kind === 'unfiled',
+        page: 1,
+    }
     void load()
 }
 
@@ -566,8 +667,8 @@ function setFolder(folderId: string | null): void {
  * Picking a folder in the rail closes the drawer on a narrow screen, so
  * the operator sees the result of the pick rather than the tree.
  */
-function onFolderPicked(folderId: string | null): void {
-    setFolder(folderId)
+function onFolderPicked(filter: MediaFolderFilter): void {
+    setFolderFilter(filter)
     railOpen.value = false
 }
 
@@ -582,7 +683,7 @@ function onFolderCreated(payload: { folder: MediaFolder; principalId: number }):
     const list = foldersByPrincipal.value[payload.principalId] ?? []
     const next = [...list, payload.folder].sort((a, b) => a.path.localeCompare(b.path))
     foldersByPrincipal.value = { ...foldersByPrincipal.value, [payload.principalId]: next }
-    setFolder(payload.folder.id)
+    setFolderFilter({ kind: 'folder', id: payload.folder.id })
 }
 
 /**
@@ -637,6 +738,95 @@ function adjustFolderCounts(from: string | null, to: string | null): void {
         })
     }
     foldersByPrincipal.value = next
+}
+
+/**
+ * The outcome of a bulk action, in one line.
+ *
+ * The counts are separate because the reasons are separate: an asset
+ * of another principal cannot be filed at all, while an asset the
+ * server refused — a filename already taken in the target folder —
+ * could not be filed this time.
+ */
+function bulkOutcome(moved: number, skipped: number, failed: number): string {
+    const parts: string[] = []
+    if (moved > 0) {
+        parts.push(t('{count} asset moved. | {count} assets moved.', { count: moved }))
+    }
+    if (skipped > 0) {
+        parts.push(t('{count} asset stayed where it is. | {count} assets stayed where they are.', { count: skipped }))
+    }
+    if (failed > 0) {
+        parts.push(t('{count} asset could not be filed. | {count} assets could not be filed.', { count: failed }))
+    }
+    return parts.join(' ')
+}
+
+/**
+ * The bulk move is done.
+ *
+ * The listing is scoped to a folder — or to the assets filed in none —
+ * so filing an asset elsewhere takes it out of the listing. Only the
+ * server knows which rows those are, so the grid is asked again.
+ */
+async function onBulkMoved(payload: {
+    moved: MediaAsset[]
+    skipped: number
+    failed: number
+}): Promise<void> {
+    for (const asset of payload.moved) {
+        const before = assets.value.find((row) => row.id === asset.id)
+        adjustFolderCounts(before?.folder_id ?? null, asset.folder_id ?? null)
+    }
+    cancelSelection()
+    await load()
+    showToast(bulkOutcome(payload.moved.length, payload.skipped, payload.failed))
+}
+
+/**
+ * Delete the selected assets.
+ *
+ * One request per asset: the server's delete is a single-asset
+ * endpoint, and a batch endpoint would have to say what it does when
+ * one of the assets is not the caller's to delete. A refusal here
+ * counts the asset as not deleted and leaves the rest alone.
+ *
+ * The grid is asked again afterwards: the listing is a page of a
+ * filtered set, and the rows behind the deleted ones have moved up.
+ */
+async function confirmBulkDelete(): Promise<void> {
+    if (bulkBusy.value) return
+    const targets = selectedAssets.value
+    if (targets.length === 0) {
+        deleteDialogOpen.value = false
+        return
+    }
+    bulkBusy.value = true
+    const deleted: MediaAsset[] = []
+    let failed = 0
+    for (const asset of targets) {
+        try {
+            await api.value.delete(`/media/${asset.id}`)
+            deleted.push(asset)
+        } catch {
+            failed++
+        }
+    }
+    bulkBusy.value = false
+    deleteDialogOpen.value = false
+    for (const asset of deleted) {
+        adjustFolderCounts(asset.folder_id ?? null, null)
+    }
+    cancelSelection()
+    await load()
+    if (failed > 0) {
+        showToast(t('{count} asset deleted, {failed} could not be. | {count} assets deleted, {failed} could not be.', {
+            count: deleted.length,
+            failed,
+        }))
+        return
+    }
+    showToast(t('{count} asset deleted. | {count} assets deleted.', { count: deleted.length }))
 }
 
 function setKind(kind: MediaAssetKind | ''): void {
@@ -820,11 +1010,11 @@ onBeforeUnmount(() => {
                         :selected-scope="selectedScope"
                         :group-labels="groupLabelsByPrincipalId"
                         :folders="scopedFolders"
-                        :selected-folder-id="query.folderId ?? null"
+                        :selected="folderFilter"
                         :drag-active="draggedAsset !== null"
                         :error="filingError"
                         @update:scope="setScope"
-                        @update:folder-id="onFolderPicked"
+                        @update:selected="onFolderPicked"
                         @new-folder="newFolderOpen = true"
                         @close="railOpen = false"
                         @file-asset="onFileAsset"
@@ -841,12 +1031,25 @@ onBeforeUnmount(() => {
                         :principals="visiblePrincipals"
                         :selected-scope="selectedScope"
                         :group-labels="groupLabelsByPrincipalId"
+                        :selection-mode="selectionMode"
                         @update:type="setType"
                         @update:search="setSearch"
                         @update:kind="setKind"
                         @update:scope="setScope"
                         @upload-click="openUploadDialog"
                         @open-folders="railOpen = true"
+                        @toggle-selection="selectionMode = !selectionMode"
+                    />
+
+                    <MediaSelectionBar
+                        v-if="selectionMode"
+                        :count="selectedIds.length"
+                        :all-selected="selectedIds.length === assets.length && assets.length > 0"
+                        :busy="bulkBusy"
+                        @move="moveDialogOpen = true"
+                        @delete="deleteDialogOpen = true"
+                        @cancel="cancelSelection"
+                        @select-all="toggleSelectAll"
                     />
 
                     <div v-if="loading" class="text-sm text-muted-foreground">{{ t('Loading media…') }}</div>
@@ -857,11 +1060,14 @@ onBeforeUnmount(() => {
                         <MediaGrid
                             :assets="assets"
                             :folders="allFolders"
-                            :folder-name="selectedFolderName"
+                            :filter="folderFilter"
+                            :selectable="selectionMode"
+                            :selected-ids="selectedIds"
                             @select="select"
                             @upload-click="openUploadDialog"
                             @drag-start="draggedAsset = $event"
                             @drag-end="draggedAsset = null"
+                            @toggle-select="toggleAssetSelection"
                         />
                         <div
                             v-if="assets.length > 0 && (canLoadMore || loadingMore || appendError)"
@@ -919,6 +1125,28 @@ onBeforeUnmount(() => {
                 @uploaded="onUploaded"
                 @close="uploadDialogOpen = false"
             />
+
+            <MediaMoveDialog
+                v-if="moveDialogOpen"
+                :host-context="hostContext"
+                :assets="selectedAssets"
+                :principals="visiblePrincipals"
+                :group-labels="groupLabelsByPrincipalId"
+                :folders-by-principal="foldersByPrincipal"
+                @moved="onBulkMoved"
+                @close="moveDialogOpen = false"
+            />
+
+            <MediaDeleteDialog
+                v-if="deleteDialogOpen"
+                :title="t('Delete {count} asset? | Delete {count} assets?', { count: selectedIds.length })"
+                :description="t('{count} asset will be permanently deleted. This cannot be undone. | {count} assets will be permanently deleted. This cannot be undone.', { count: selectedIds.length })"
+                :busy="bulkBusy"
+                @confirm="confirmBulkDelete"
+                @close="deleteDialogOpen = false"
+            />
+
+            <MediaToast :message="toast" />
 
             <div class="hidden">
                 <Image class="h-4 w-4" />

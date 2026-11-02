@@ -20,7 +20,9 @@ import { MdPreview } from 'md-editor-v3'
 // Deliberately kept although the editor is gone: `<MdPreview>` needs its typography.
 import 'md-editor-v3/lib/style.css'
 import VersionsStrip from '../components/VersionsStrip.vue'
+import MediaDeleteDialog from '../components/MediaDeleteDialog.vue'
 import MediaFolderPicker from '../components/MediaFolderPicker.vue'
+import MediaToast from '../components/MediaToast.vue'
 
 // `md-editor-v3` defaults to Chinese; pin the preview to en-US.
 const MARKDOWN_LOCALE = 'en-US'
@@ -189,7 +191,6 @@ const isMarkdownPreview = computed<boolean>(() => {
 })
 
 const lightboxRef = ref<HTMLDialogElement | null>(null)
-const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
 const toast = ref<string | null>(null)
 
@@ -637,14 +638,20 @@ async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
     }
 }
 
+/**
+ * The delete dialog is open.
+ *
+ * The dialog itself opens on mount and closes itself — it is a
+ * component, so it owns its `<dialog>` element.
+ */
+const deleteDialogOpen = ref(false)
+
 function openDeleteDialog(): void {
-    deleteDialogRef.value?.showModal()
+    deleteDialogOpen.value = true
 }
 
 function closeDeleteDialog(): void {
-    if (deleteDialogRef.value?.open) {
-        deleteDialogRef.value.close()
-    }
+    deleteDialogOpen.value = false
 }
 
 async function confirmDelete(): Promise<void> {
@@ -1355,54 +1362,14 @@ onBeforeUnmount(() => {
           sticks to the upper left corner. The same shape as the upload
           dialog: a stripped `<dialog>` around a fixed, centred backdrop.
         -->
-        <dialog
-            v-if="asset"
-            ref="deleteDialogRef"
-            class="m-0 border-0 bg-transparent p-0"
-            aria-labelledby="delete-title"
-            aria-describedby="delete-desc"
-            data-testid="delete-confirm-dialog"
-            @cancel.prevent="closeDeleteDialog"
-        >
-            <div
-                class="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4"
-                data-testid="delete-confirm-backdrop"
-            >
-                <div class="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-2xl">
-                    <h2 id="delete-title" class="text-base font-semibold">{{ t('Delete asset?') }}</h2>
-                    <p id="delete-desc" class="mt-2 text-sm text-muted-foreground">
-                        {{ t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') }) }}
-                    </p>
-                    <div class="mt-4 flex justify-end gap-2">
-                        <button
-                            type="button"
-                            class="rounded px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
-                            data-testid="delete-cancel"
-                            @click="closeDeleteDialog"
-                        >
-                            {{ t('Cancel') }}
-                        </button>
-                        <button
-                            type="button"
-                            class="rounded bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
-                            data-testid="delete-confirm"
-                            @click="confirmDelete"
-                        >
-                            {{ t('Delete') }}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </dialog>
+        <MediaDeleteDialog
+            v-if="asset && deleteDialogOpen"
+            :title="t('Delete asset?')"
+            :description="t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') })"
+            @confirm="confirmDelete"
+            @close="closeDeleteDialog"
+        />
 
-        <!-- Toast -->
-        <output
-            v-if="toast"
-            aria-live="polite"
-            class="pointer-events-none fixed inset-x-0 bottom-6 z-50 mx-auto w-fit rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg"
-            data-testid="media-toast"
-        >
-            {{ toast }}
-        </output>
+        <MediaToast :message="toast" />
     </div>
 </template>

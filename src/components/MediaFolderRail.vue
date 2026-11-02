@@ -22,8 +22,8 @@
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, FolderPlus, FolderTree, Users, X } from 'lucide-vue-next'
-import type { MediaPrincipal, ScopedMediaFolder } from '../types'
+import { Folder, FolderPlus, FolderTree, Inbox, Users, X } from 'lucide-vue-next'
+import type { MediaFolderFilter, MediaPrincipal, ScopedMediaFolder } from '../types'
 import { buildFolderTree, flattenFolderTree } from '../lib/folder-tree'
 import MediaScopeSelect from './MediaScopeSelect.vue'
 
@@ -38,10 +38,10 @@ const props = withDefaults(defineProps<{
      */
     folders?: ScopedMediaFolder[]
     /**
-     * The selected folder id, or `null` for the tree's root (the whole
-     * library).
+     * Which slice of the library the listing shows: everything, one
+     * folder, or the assets filed in no folder.
      */
-    selectedFolderId?: string | null
+    selected?: MediaFolderFilter
     /**
      * Whether a card is being dragged over the panel. The rows then
      * read as drop targets.
@@ -56,14 +56,14 @@ const props = withDefaults(defineProps<{
 }>(), {
     myMediaLabel: null,
     folders: () => [],
-    selectedFolderId: null,
+    selected: () => ({ kind: 'all' }),
     dragActive: false,
     error: null,
 })
 
 const emit = defineEmits<{
     (event: 'update:scope', value: number | null): void
-    (event: 'update:folderId', value: string | null): void
+    (event: 'update:selected', value: MediaFolderFilter): void
     (event: 'new-folder'): void
     (event: 'close'): void
     /**
@@ -123,6 +123,13 @@ const groups = computed<RailGroup[]>(() => {
  * scope, and only when there is more than one principal to group by.
  */
 const grouped = computed(() => props.selectedScope === null && props.principals.length > 1)
+
+/**
+ * Whether a folder row is the selected one.
+ */
+function isSelected(folderId: string): boolean {
+    return props.selected.kind === 'folder' && props.selected.id === folderId
+}
 
 function folderCount(principalId: number): number {
     return props.folders.filter((folder) => folder.principal_id === principalId).length
@@ -216,19 +223,39 @@ function onDrop(event: DragEvent, folderId: string | null): void {
             <button
                 type="button"
                 class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
-                :class="selectedFolderId === null ? 'bg-muted font-medium' : ''"
-                :aria-pressed="selectedFolderId === null"
+                :class="selected.kind === 'all' ? 'bg-muted font-medium' : ''"
+                :aria-pressed="selected.kind === 'all'"
                 data-testid="media-folder-root"
-                @click="emit('update:folderId', null)"
+                @click="emit('update:selected', { kind: 'all' })"
                 @dragover="onDragOver($event, null)"
                 @dragleave="onDragLeave(null)"
                 @drop="onDrop($event, null)"
             >
                 <FolderTree
                     class="h-3.5 w-3.5 shrink-0"
-                    :class="selectedFolderId === null ? 'text-primary' : 'text-muted-foreground'"
+                    :class="selected.kind === 'all' ? 'text-primary' : 'text-muted-foreground'"
                 />
                 <span class="flex-1">{{ t('All media') }}</span>
+            </button>
+
+            <!--
+              The pile that belongs to no folder. It is a filter, not a
+              drop target: dropping a card here would take it out of its
+              folder, which is what the row above already does.
+            -->
+            <button
+                type="button"
+                class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                :class="selected.kind === 'unfiled' ? 'bg-muted font-medium' : ''"
+                :aria-pressed="selected.kind === 'unfiled'"
+                data-testid="media-folder-unfiled"
+                @click="emit('update:selected', { kind: 'unfiled' })"
+            >
+                <Inbox
+                    class="h-3.5 w-3.5 shrink-0"
+                    :class="selected.kind === 'unfiled' ? 'text-primary' : 'text-muted-foreground'"
+                />
+                <span class="flex-1">{{ t('All media without a folder') }}</span>
             </button>
 
             <template v-for="group in groups" :key="group.principal?.id ?? 'scope'">
@@ -261,21 +288,21 @@ function onDrop(event: DragEvent, folderId: string | null): void {
                     type="button"
                     class="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-sm transition-colors hover:bg-muted"
                     :class="[
-                        selectedFolderId === row.folder.id ? 'bg-muted font-medium' : '',
+                        isSelected(row.folder.id) ? 'bg-muted font-medium' : '',
                         dropTargetId === row.folder.id ? 'bg-primary/10 ring-1 ring-primary' : '',
                     ]"
                     :style="{ paddingLeft: `${0.75 + row.depth * 0.9}rem` }"
-                    :aria-pressed="selectedFolderId === row.folder.id"
+                    :aria-pressed="isSelected(row.folder.id)"
                     :data-testid="`media-folder-${row.folder.id}`"
                     :data-folder-path="row.folder.path"
-                    @click="emit('update:folderId', row.folder.id)"
+                    @click="emit('update:selected', { kind: 'folder', id: row.folder.id })"
                     @dragover="onDragOver($event, row.folder.id)"
                     @dragleave="onDragLeave(row.folder.id)"
                     @drop="onDrop($event, row.folder.id)"
                 >
                     <Folder
                         class="h-3.5 w-3.5 shrink-0"
-                        :class="selectedFolderId === row.folder.id ? 'text-primary' : 'text-muted-foreground'"
+                        :class="isSelected(row.folder.id) ? 'text-primary' : 'text-muted-foreground'"
                     />
                     <span class="min-w-0 flex-1 truncate">{{ row.folder.name }}</span>
                     <span class="shrink-0 text-[11px] tabular-nums text-muted-foreground">

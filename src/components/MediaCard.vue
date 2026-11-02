@@ -1,18 +1,31 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Image, FileAudio, FileVideo, FileText, Folder } from 'lucide-vue-next'
+import { Check, Image, FileAudio, FileVideo, FileText, Folder } from 'lucide-vue-next'
 import type { MediaAsset, MediaFolder } from '../types'
 import { useShowTemporaryToggle } from '../composables/useShowTemporaryToggle'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     asset: MediaAsset
     /**
      * The folder the asset is filed in, resolved from the folder list.
      * `null` for an asset in the root — the card then shows no badge.
      */
     folder?: MediaFolder | null
-}>()
+    /**
+     * Whether the card is a selection target. In selection mode a click
+     * toggles the asset instead of opening its detail page.
+     */
+    selectable?: boolean
+    /**
+     * Whether the asset is selected.
+     */
+    selected?: boolean
+}>(), {
+    folder: null,
+    selectable: false,
+    selected: false,
+})
 
 const emit = defineEmits<{
     (event: 'select', asset: MediaAsset): void
@@ -23,6 +36,10 @@ const emit = defineEmits<{
      */
     (event: 'drag-start', asset: MediaAsset): void
     (event: 'drag-end'): void
+    /**
+     * The card was clicked while the panel is in selection mode.
+     */
+    (event: 'toggle-select', asset: MediaAsset): void
 }>()
 
 const { t } = useI18n()
@@ -38,6 +55,19 @@ function onDragStart(event: DragEvent): void {
         event.dataTransfer.effectAllowed = 'move'
     }
     emit('drag-start', props.asset)
+}
+
+/**
+ * A click opens the detail page — unless the panel is selecting, in
+ * which case the same click adds or removes the asset from the
+ * selection. One control, two jobs, chosen by the panel's mode.
+ */
+function onClick(): void {
+    if (props.selectable) {
+        emit('toggle-select', props.asset)
+        return
+    }
+    emit('select', props.asset)
 }
 
 const isImage = computed(() => props.asset.media_type === 'image')
@@ -100,9 +130,12 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
 <template>
     <button
         type="button"
-        draggable="true"
+        :draggable="!selectable"
         class="group flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40 hover:bg-card/80 focus:outline-none focus:ring-2 focus:ring-primary"
+        :class="selected ? 'border-primary ring-2 ring-primary' : ''"
+        :aria-pressed="selectable ? selected : undefined"
         :data-testid="`media-card-${asset.id}`"
+        @click="onClick"
         @dragstart="onDragStart"
         @dragend="emit('drag-end')"
     >
@@ -113,6 +146,21 @@ const derivativeChips = computed<ReadonlyArray<DerivativeChip>>(() => {
                 data-testid="media-card-temporary-badge"
             >
                 {{ t('Temporary') }}
+            </span>
+            <!--
+              The selection mark. It is not a control of its own: the
+              whole card is the toggle, and the mark only says what the
+              card's state is.
+            -->
+            <span
+                v-if="selectable"
+                class="pointer-events-none absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border transition-colors"
+                :class="selected
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-background/80 text-transparent'"
+                data-testid="media-card-selection"
+            >
+                <Check class="h-3.5 w-3.5" />
             </span>
             <img
                 v-if="isImage"

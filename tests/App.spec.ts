@@ -1301,3 +1301,186 @@ describe('App.vue arrangement', () => {
         expect(last).toContain('folder_id=folder-9')
     })
 })
+
+describe('App.vue selection', () => {
+    /**
+     * Two assets of the user principal, so a bulk move has something to
+     * move and a bulk delete something to delete.
+     */
+    const twoAssets: MediaListResponse = {
+        assets: [
+            { ...sample, id: 'asset-1', principal_id: 101 },
+            { ...sample, id: 'asset-2', principal_id: 101 },
+        ],
+        page: 1,
+        perPage: 24,
+        total: 2,
+        lastPage: 1,
+    }
+
+    function buildListContext(list: MediaListResponse): {
+        helper: PluginHostContext
+        patch: ReturnType<typeof vi.fn>
+        remove: ReturnType<typeof vi.fn>
+    } {
+        const get = vi.fn().mockImplementation((path: string) => {
+            if (path === '/principals/me') {
+                return Promise.resolve({ principals: defaultPrincipals })
+            }
+            if (path === '/groups') {
+                return Promise.resolve({ groups: defaultGroups })
+            }
+            if (path.startsWith('/media/folders')) {
+                return Promise.resolve({ folders: defaultFolders })
+            }
+            return Promise.resolve(list)
+        })
+        const helper = buildContext(get)
+        const patch = helper.api.patch as unknown as ReturnType<typeof vi.fn>
+        const remove = helper.api.delete as unknown as ReturnType<typeof vi.fn>
+        patch.mockImplementation((path: string) => Promise.resolve({
+            ...sample,
+            id: path.slice('/media/'.length),
+            principal_id: 101,
+            folder_id: 'folder-1',
+        }))
+        remove.mockResolvedValue({ deleted: true })
+        return { helper, patch, remove }
+    }
+
+    it('selects assets in the overview and counts them', async () => {
+        const { helper } = buildListContext(twoAssets)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        // The selection mode is off: a click opens the detail page.
+        expect(wrapper.find('[data-testid="media-selection-bar"]').exists()).toBe(false)
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-selection-bar"]').exists()).toBe(true)
+
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-selection-count"]').text()).toContain('2 assets selected')
+
+        // A second click takes the asset out again.
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-selection-count"]').text()).toContain('1 asset selected')
+    })
+
+    it('files the selected assets into a folder together', async () => {
+        const { helper, patch } = buildListContext(twoAssets)
+        // Into the document: the move dialog's form only submits when
+        // it is attached, the way a browser does it.
+        const wrapper = mount(App, { props: { hostContext: helper }, attachTo: document.body })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-move"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-move-dialog"]').exists()).toBe(true)
+        await wrapper.find('[data-testid="media-move-folder-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-move-folder-option-folder-1"]').trigger('click')
+        // The submit button has to be pressed the way the browser does:
+        // the click has to reach the button itself, so the form submits.
+        ;(wrapper.find('[data-testid="media-move-submit"]').element as HTMLButtonElement).click()
+        await flushPromises()
+        await flushPromises()
+
+        expect(patch).toHaveBeenCalledTimes(2)
+        expect(patch).toHaveBeenCalledWith('/media/asset-1', { folder_id: 'folder-1' })
+        expect(patch).toHaveBeenCalledWith('/media/asset-2', { folder_id: 'folder-1' })
+        // The selection is spent.
+        expect(wrapper.find('[data-testid="media-selection-bar"]').exists()).toBe(false)
+        // The operator is told what happened.
+        expect(wrapper.find('[data-testid="media-toast"]').text()).toContain('2 assets moved.')
+        wrapper.unmount()
+    })
+
+    it('deletes the selected assets, but only after the confirmation', async () => {
+        const { helper, remove } = buildListContext(twoAssets)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        // The confirmation is up, and nothing is deleted yet.
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(true)
+        expect(remove).not.toHaveBeenCalled()
+
+        await wrapper.find('[data-testid="delete-cancel"]').trigger('click')
+        expect(remove).not.toHaveBeenCalled()
+
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+        await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        expect(remove).toHaveBeenCalledTimes(2)
+        expect(remove).toHaveBeenCalledWith('/media/asset-1')
+        expect(remove).toHaveBeenCalledWith('/media/asset-2')
+    })
+
+    it('leaves the selection mode when the operator cancels', async () => {
+        const { helper } = buildListContext(twoAssets)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-cancel"]').trigger('click')
+
+        expect(wrapper.find('[data-testid="media-selection-bar"]').exists()).toBe(false)
+        // The mode is off too, so a click opens the detail page again.
+        expect(wrapper.find('[data-testid="media-selection-toggle"]').exists()).toBe(true)
+    })
+})
+
+describe('App.vue the unfiled slice', () => {
+    it('asks for the assets filed in no folder', async () => {
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-folder-unfiled"]').trigger('click')
+        await flushPromises()
+
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('unfiled=true')
+        expect(last).not.toContain('folder_id=')
+    })
+
+    it('keeps the unfiled slice when the scope changes', async () => {
+        // The unfiled slice names no folder, so it survives a scope
+        // change — the folder filter does not.
+        const get = vi.fn().mockResolvedValue(emptyList)
+        const helper = buildContext(get)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-folder-unfiled"]').trigger('click')
+        await flushPromises()
+        await wrapper.find('[data-testid="media-scope-toggle"]').trigger('click')
+        await flushPromises()
+        await wrapper.find('[data-testid="media-scope-option-101"]').trigger('click')
+        await flushPromises()
+
+        const last = get.mock.calls.at(-1)?.[0] ?? ''
+        expect(last).toContain('unfiled=true')
+    })
+})

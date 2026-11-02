@@ -9,6 +9,7 @@ describe('parseListQuery', () => {
             plugin: '',
             search: '',
             folderId: '',
+            unfiled: false,
             kind: '',
             scope: 'all',
             page: 1,
@@ -22,11 +23,18 @@ describe('parseListQuery', () => {
             plugin: 'minimax',
             search: 'hello',
             folderId: '',
+            unfiled: false,
             kind: '',
             scope: 'all',
             page: 2,
             perPage: 5,
         })
+    })
+
+    it('parses the unfiled filter', () => {
+        expect(parseListQuery('/media?unfiled=true').unfiled).toBe(true)
+        expect(parseListQuery('/media?unfiled=false').unfiled).toBe(false)
+        expect(parseListQuery('/media').unfiled).toBe(false)
     })
 
     it('parses scope=mine and defaults to all', () => {
@@ -55,40 +63,40 @@ describe('filterFixture', () => {
     const corpus: MediaAsset[] = FIXTURE
 
     it('returns the full fixture when no filters are set', () => {
-        expect(filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
+        expect(filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
     })
 
     it('filters by media_type', () => {
-        const result = filterFixture({ type: 'image', plugin: '', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: '', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.length).toBeGreaterThan(0)
         expect(result.every((a) => a.media_type === 'image')).toBe(true)
     })
 
     it('filters by plugin_slug', () => {
-        const result = filterFixture({ type: '', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.plugin_slug === 'tavily')).toBe(true)
     })
 
     it('filters by case-insensitive prompt substring', () => {
-        const result = filterFixture({ type: '', plugin: '', search: 'alpine', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: '', search: 'alpine', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.some((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
         expect(result.every((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
     })
 
     it('combines multiple filters with AND semantics', () => {
-        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.media_type === 'image' && a.plugin_slug === 'minimax')).toBe(true)
     })
 
     it('returns an empty array when nothing matches', () => {
-        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toEqual([])
+        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)).toEqual([])
     })
 
     it('filters by scope=mine to the current user only', () => {
-        const mine = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'mine', page: 1, perPage: 24 }, corpus)
+        const mine = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'mine', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(mine.length).toBeGreaterThan(0)
         expect(mine.every((a) => (a as unknown as { user_id: number }).user_id === 42)).toBe(true)
-        const all = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const all = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(all.length).toBeGreaterThan(mine.length)
     })
 })
@@ -212,7 +220,18 @@ describe('createMockApi', () => {
 
     it('rejects write verbs it does not model', async () => {
         await expect(api.post('/media', {})).rejects.toThrow()
-        await expect(api.delete('/media/demo-1')).rejects.toThrow()
+    })
+
+    it('deletes an asset', async () => {
+        // Its own mock: the shared one is stateful, and a deleted row
+        // would be gone for the tests that follow.
+        const fresh = createMockApi()
+        const before = await fresh.get<MediaListResponse>('/media')
+        const target = before.assets[0]
+        expect(target).toBeDefined()
+        await fresh.delete(`/media/${target?.id}`)
+        const after = await fresh.get<MediaListResponse>('/media')
+        expect(after.assets.some((asset) => asset.id === target?.id)).toBe(false)
     })
 
     it('files an asset into a folder of its principal', async () => {

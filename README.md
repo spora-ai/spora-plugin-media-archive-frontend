@@ -154,6 +154,39 @@ indistinguishable from one under "Templates".
   **Unknown folder**: the asset is filed in a folder the panel cannot
   see, and "No folder" would be a false claim.
 
+### The folder filter
+
+The rail offers two roots: **All media** (the whole library) and **All
+media without a folder** (the assets filed in no folder). They are
+exclusive on the wire — `?folder_id=` names one folder, `?unfiled=true`
+names the assets in none, and the server ignores the flag when a folder
+is named.
+
+`MediaFolderFilter` (`{ kind: 'all' | 'folder' | 'unfiled' }`) is the one
+value the rail, the grid and the drag-and-drop work with; the wire query
+keeps the two filters apart because the server does.
+
+### Selecting several assets
+
+The toolbar's **Select** button turns the selection mode on. Every card
+grows a tick, a click toggles the asset instead of opening its detail
+page, and the bar under the toolbar counts the selection and offers
+**Move to folder** and **Delete**.
+
+- The move opens `MediaMoveDialog.vue`, which uses the folder picker.
+  A folder belongs to one principal and the server scopes a folder write
+  by the asset's principal, so a selection spanning principals asks which
+  principal's folders to use and the other assets stay where they are.
+- The delete asks first, through `MediaDeleteDialog.vue` — the same
+  component the detail page's single delete uses.
+- Both are one request per asset: the server's endpoints are
+  single-asset, and a batch endpoint would have to say what it does when
+  one of the assets is not the caller's. The toast counts what happened:
+  filed, skipped, refused.
+- After a bulk action the grid is asked again: the listing is a page of
+  a filtered set, and filing an asset elsewhere takes it out of the
+  listing.
+
 ### Kind filter
 
 An `asset / template / example` dropdown in the toolbar, plus an

@@ -227,9 +227,35 @@ export interface MediaListQuery {
      */
     folderId?: string | null
     /**
+     * Scope the listing to the assets filed in **no** folder. Sent as
+     * `?unfiled=true`.
+     *
+     * The server ignores it when a `folder_id` is sent — a folder is
+     * the more specific filter — so the two never travel together.
+     */
+    unfiled?: boolean
+    /**
      * The advisory mark the listing is scoped to, or `''` for every
      * mark. One value per request; an unknown value is dropped by the
      * server and the listing stays unfiltered.
      */
     kind?: MediaAssetKind | ''
 }
+
+/**
+ * Which slice of the library the listing shows.
+ *
+ * - `all` — everything the principal scope allows
+ * - `folder` — the assets filed in one folder
+ * - `unfiled` — the assets filed in no folder
+ *
+ * The third state is not a corner case: a library that has just been
+ * given folders holds most of its assets in none of them, and "show me
+ * what is not filed yet" is the first question an operator asks while
+ * sorting. It is a different question from "show me a folder", so it
+ * gets its own state rather than a folder id that means "no folder".
+ */
+export type MediaFolderFilter =
+    | { kind: 'all' }
+    | { kind: 'folder'; id: string }
+    | { kind: 'unfiled' }

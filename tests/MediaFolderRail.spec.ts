@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MediaFolderRail from '../src/components/MediaFolderRail.vue'
-import type { MediaPrincipal, ScopedMediaFolder } from '../src/types'
+import type { MediaFolderFilter, MediaPrincipal, ScopedMediaFolder } from '../src/types'
 
 const userPrincipal: MediaPrincipal = { id: 101, type: 'user', user_id: 1, group_id: null }
 const marketingPrincipal: MediaPrincipal = { id: 202, type: 'group', user_id: null, group_id: 10 }
@@ -18,7 +18,7 @@ function mountRail(props: {
     groupLabels?: Record<number, string>
     myMediaLabel?: string | null
     folders?: ScopedMediaFolder[]
-    selectedFolderId?: string | null
+    selected?: MediaFolderFilter
 } = {}) {
     return mount(MediaFolderRail, {
         props: {
@@ -27,7 +27,7 @@ function mountRail(props: {
             groupLabels: props.groupLabels ?? { 202: 'Marketing Team' },
             myMediaLabel: props.myMediaLabel ?? null,
             folders: props.folders ?? folders,
-            selectedFolderId: props.selectedFolderId ?? null,
+            selected: props.selected ?? { kind: 'all' },
         },
     })
 }
@@ -76,30 +76,42 @@ describe('MediaFolderRail.vue tree', () => {
         expect(indentOf(wrapper, 'folder-3')).toBe(indentOf(wrapper, 'folder-1'))
     })
 
-    it('emits the picked folder id', async () => {
+    it('emits the picked folder', async () => {
         const wrapper = mountRail()
         await wrapper.find('[data-testid="media-folder-folder-2"]').trigger('click')
-        expect(wrapper.emitted('update:folderId')?.[0]).toEqual(['folder-2'])
+        expect(wrapper.emitted('update:selected')?.[0]).toEqual([{ kind: 'folder', id: 'folder-2' }])
     })
 
-    it('emits null when the root is picked, clearing the folder filter', async () => {
-        const wrapper = mountRail({ selectedFolderId: 'folder-1' })
+    it('emits the whole library when the root is picked, clearing the folder filter', async () => {
+        const wrapper = mountRail({ selected: { kind: 'folder', id: 'folder-1' } })
         await wrapper.find('[data-testid="media-folder-root"]').trigger('click')
-        expect(wrapper.emitted('update:folderId')?.[0]).toEqual([null])
+        expect(wrapper.emitted('update:selected')?.[0]).toEqual([{ kind: 'all' }])
+    })
+
+    it('emits the unfiled slice when it is picked', async () => {
+        const wrapper = mountRail()
+        await wrapper.find('[data-testid="media-folder-unfiled"]').trigger('click')
+        expect(wrapper.emitted('update:selected')?.[0]).toEqual([{ kind: 'unfiled' }])
     })
 
     it('marks the selected folder as pressed', () => {
-        const wrapper = mountRail({ selectedFolderId: 'folder-2' })
+        const wrapper = mountRail({ selected: { kind: 'folder', id: 'folder-2' } })
         expect(wrapper.find('[data-testid="media-folder-folder-2"]').attributes('aria-pressed')).toBe('true')
         expect(wrapper.find('[data-testid="media-folder-folder-1"]').attributes('aria-pressed')).toBe('false')
     })
 
     it('marks the root as pressed while no folder is selected', () => {
-        const root = mountRail({ selectedFolderId: null })
+        const root = mountRail({ selected: { kind: 'all' } })
         expect(root.find('[data-testid="media-folder-root"]').attributes('aria-pressed')).toBe('true')
 
-        const scoped = mountRail({ selectedFolderId: 'folder-1' })
+        const scoped = mountRail({ selected: { kind: 'folder', id: 'folder-1' } })
         expect(scoped.find('[data-testid="media-folder-root"]').attributes('aria-pressed')).toBe('false')
+    })
+
+    it('marks the unfiled row as pressed while it is the selected slice', () => {
+        const wrapper = mountRail({ selected: { kind: 'unfiled' } })
+        expect(wrapper.find('[data-testid="media-folder-unfiled"]').attributes('aria-pressed')).toBe('true')
+        expect(wrapper.find('[data-testid="media-folder-root"]').attributes('aria-pressed')).toBe('false')
     })
 })
 
