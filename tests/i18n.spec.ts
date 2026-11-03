@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import App from '../src/App.vue'
-import MediaFilters from '../src/components/MediaFilters.vue'
+import MediaToolbar from '../src/components/MediaToolbar.vue'
+import MediaFolderRail from '../src/components/MediaFolderRail.vue'
 import en from '../src/locales/en.json'
 import de from '../src/locales/de.json'
 import { messages } from '../src/i18n'
@@ -76,11 +77,12 @@ describe('German rendering', () => {
         expect(wrapper.text()).toContain('0 Dateien in Ihrem Archiv.')
     })
 
-    it('renders the type pills in German', () => {
-        const wrapper = mount(MediaFilters, {
+    it('renders the type dropdown in German', async () => {
+        const wrapper = mount(MediaToolbar, {
             props: {
                 type: '',
                 search: '',
+                kind: '',
                 principals: [],
                 selectedScope: null,
                 groupLabels: {},
@@ -90,8 +92,26 @@ describe('German rendering', () => {
             },
         })
 
-        expect(wrapper.find('[data-testid="media-type-all"]').text()).toContain('Alle')
-        expect(wrapper.find('[data-testid="media-type-image"]').text()).toContain('Bilder')
-        expect(wrapper.find('[data-testid="media-type-document"]').text()).toContain('Dokumente')
+        await wrapper.find('[data-testid="media-type-select-toggle"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-type-select-option-all"]').text()).toContain('Alle')
+        expect(wrapper.find('[data-testid="media-type-select-option-image"]').text()).toContain('Bilder')
+        expect(wrapper.find('[data-testid="media-type-select-option-document"]').text()).toContain('Dokumente')
+    })
+
+    it('renders the folder rail in German', () => {
+        const wrapper = mount(MediaFolderRail, {
+            props: {
+                principals: [{ id: 101, type: 'user', user_id: 1, group_id: null }],
+                selectedScope: null,
+                groupLabels: {},
+            },
+            global: {
+                plugins: [createI18n({ legacy: false, locale: 'de', fallbackLocale: 'en', messages })],
+            },
+        })
+
+        expect(wrapper.text()).toContain('Ordner')
+        expect(wrapper.find('[data-testid="media-new-folder-button"]').text()).toContain('Neuer Ordner')
+        expect(wrapper.find('[data-testid="media-folder-root"]').text()).toContain('Alle Medien')
     })
 })

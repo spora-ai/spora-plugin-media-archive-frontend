@@ -14,12 +14,15 @@ import {
     Trash2,
     X,
 } from 'lucide-vue-next'
-import type { MediaAsset, MediaDerivative } from '../types'
+import type { MediaAsset, MediaAssetKind, MediaDerivative, MediaFolder } from '../types'
 import type { PluginHostContext } from '../shims'
 import { MdPreview } from 'md-editor-v3'
 // Deliberately kept although the editor is gone: `<MdPreview>` needs its typography.
 import 'md-editor-v3/lib/style.css'
 import VersionsStrip from '../components/VersionsStrip.vue'
+import MediaDeleteDialog from '../components/MediaDeleteDialog.vue'
+import MediaFolderPicker from '../components/MediaFolderPicker.vue'
+import MediaToast from '../components/MediaToast.vue'
 
 // `md-editor-v3` defaults to Chinese; pin the preview to en-US.
 const MARKDOWN_LOCALE = 'en-US'
@@ -27,6 +30,14 @@ const MARKDOWN_LOCALE = 'en-US'
 const props = defineProps<{
     assetId: string
     hostContext: PluginHostContext
+    /**
+     * The folders of every visible principal, keyed by principal id.
+     *
+     * The picker needs the principal's own folders: the server scopes a
+     * folder write by the asset's principal and refuses a folder of
+     * another one, so offering them would be offering a refusal.
+     */
+    foldersByPrincipal?: Record<number, MediaFolder[]>
 }>()
 
 const emit = defineEmits<{
@@ -180,7 +191,6 @@ const isMarkdownPreview = computed<boolean>(() => {
 })
 
 const lightboxRef = ref<HTMLDialogElement | null>(null)
-const deleteDialogRef = ref<HTMLDialogElement | null>(null)
 const lightboxOpen = ref(false)
 const toast = ref<string | null>(null)
 
@@ -318,6 +328,132 @@ const downloadLabel = computed<string>(() => {
 const isShared = computed(() => asset.value !== null && Boolean(asset.value.public_url))
 
 const tagsString = computed(() => (asset.value?.tags ?? []).join(', '))
+
+/**
+ * The asset's `folder_id`, or `null` for the root.
+ *
+ * `undefined` (a core predating the folders release) and `null` both
+ * mean "no folder". An id that is set but resolves to no folder is the
+ * third state: the asset IS filed in a folder the panel could not
+ * resolve, which is not the same thing as having no folder.
+ */
+const folderId = computed<string | null>(() => {
+    const id = asset.value?.folder_id
+    return typeof id === 'string' && id !== '' ? id : null
+})
+
+/**
+ * The principal the asset belongs to.
+ *
+ * A folder write is scoped by it: the server refuses a folder of
+ * another principal, so the picker offers this principal's folders and
+ * no others.
+ */
+const assetPrincipalId = computed<number | null>(() => {
+    const id = asset.value?.principal_id
+    return typeof id === 'number' ? id : null
+})
+
+/**
+ * The folders the asset can be filed into: the ones its principal owns,
+ * ordered by path.
+ */
+const fileableFolders = computed<MediaFolder[]>(() => {
+    const principal = assetPrincipalId.value
+    if (principal === null) {
+        return []
+    }
+    return [...(props.foldersByPrincipal?.[principal] ?? [])].sort((a, b) =>
+        a.path.localeCompare(b.path),
+    )
+})
+
+/**
+ * What the folder picker shows.
+ *
+ * A refused PATCH leaves the server's folder unchanged, and a bound
+ * `:value` is not re-patched when the bound value does not change — so
+ * the picker would keep showing a folder the server never accepted.
+ * The local ref is reset from the server's folder on every change.
+ */
+const folderSelection = ref<string | null>(null)
+
+watch(folderId, (value) => {
+    folderSelection.value = value
+}, { immediate: true })
+
+async function setFolder(next: string | null): Promise<void> {
+    if (asset.value === null || next === folderId.value) {
+        return
+    }
+    const result = await mutate({
+        field: 'folder',
+        verb: 'patch',
+        path: `/media/${asset.value.id}`,
+        body: { folder_id: next },
+        successToast: next === null
+            ? t('Removed from the folder')
+            : t('Moved to the folder'),
+    })
+    if (result?.updated) {
+        emit('updated', result.updated)
+        return
+    }
+    folderSelection.value = folderId.value
+}
+
+/**
+ * The mark on the asset.
+ *
+ * The mark is advisory — nothing refuses an asset because of it — and
+ * the operator owns it, so it is editable here. A core that predates
+ * the kinds release sends no mark at all, which reads as the default.
+ */
+const kind = computed<MediaAssetKind>(() => asset.value?.kind ?? 'asset')
+
+/**
+ * What the select shows.
+ *
+ * A rejected PATCH leaves the server's mark unchanged, and a bound
+ * `:value` is not re-patched when the bound value does not change — so
+ * the select would keep showing a mark the server never accepted. The
+ * local ref is reset from the server's mark on every change.
+ */
+const kindSelection = ref<MediaAssetKind>('asset')
+
+watch(kind, (value) => {
+    kindSelection.value = value
+}, { immediate: true })
+
+/**
+ * The three marks, with their labels.
+ *
+ * The labels are literal so the i18n extractor can harvest them; a
+ * computed key would leave the catalogue without the strings.
+ */
+const KIND_OPTIONS: ReadonlyArray<{ value: MediaAssetKind; label: string }> = [
+    { value: 'asset', label: t('Asset') },
+    { value: 'template', label: t('Template') },
+    { value: 'example', label: t('Example') },
+]
+
+async function setKind(next: MediaAssetKind): Promise<void> {
+    if (asset.value === null || next === kind.value) {
+        return
+    }
+    const result = await mutate({
+        field: 'kind',
+        verb: 'patch',
+        path: `/media/${asset.value.id}`,
+        body: { kind: next },
+        successToast: t('Kind updated'),
+    })
+    if (result?.updated) {
+        emit('updated', result.updated)
+        return
+    }
+    kindSelection.value = kind.value
+}
 
 function showToast(message: string): void {
     toast.value = message
@@ -502,14 +638,20 @@ async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
     }
 }
 
+/**
+ * The delete dialog is open.
+ *
+ * The dialog itself opens on mount and closes itself — it is a
+ * component, so it owns its `<dialog>` element.
+ */
+const deleteDialogOpen = ref(false)
+
 function openDeleteDialog(): void {
-    deleteDialogRef.value?.showModal()
+    deleteDialogOpen.value = true
 }
 
 function closeDeleteDialog(): void {
-    if (deleteDialogRef.value?.open) {
-        deleteDialogRef.value.close()
-    }
+    deleteDialogOpen.value = false
 }
 
 async function confirmDelete(): Promise<void> {
@@ -990,6 +1132,39 @@ onBeforeUnmount(() => {
                         <dt class="text-muted-foreground">{{ t('Storage') }}</dt>
                         <dd class="col-span-2 text-foreground">{{ asset.storage_mode }}</dd>
 
+                        <dt class="text-muted-foreground">{{ t('Folder') }}</dt>
+                        <dd class="col-span-2" data-testid="media-detail-folder">
+                            <MediaFolderPicker
+                                :folders="fileableFolders"
+                                :model-value="folderSelection"
+                                :label="t('Folder')"
+                                :disabled="savingField !== null"
+                                testid="media-detail-folder"
+                                @update:model-value="setFolder"
+                            />
+                        </dd>
+
+                        <dt class="text-muted-foreground">{{ t('Kind') }}</dt>
+                        <dd class="col-span-2">
+                            <label for="media-detail-kind" class="sr-only">{{ t('Kind') }}</label>
+                            <select
+                                id="media-detail-kind"
+                                v-model="kindSelection"
+                                :disabled="savingField !== null"
+                                class="rounded border border-border bg-background px-2 py-1 text-foreground disabled:opacity-50"
+                                data-testid="media-detail-kind"
+                                @change="setKind(kindSelection)"
+                            >
+                                <option
+                                    v-for="option in KIND_OPTIONS"
+                                    :key="option.value"
+                                    :value="option.value"
+                                >
+                                    {{ option.label }}
+                                </option>
+                            </select>
+                        </dd>
+
                         <dt class="text-muted-foreground">Tags</dt>
                         <dd v-if="editingField !== 'tags'" class="col-span-2">
                             <button
@@ -1178,48 +1353,23 @@ onBeforeUnmount(() => {
             </video>
         </dialog>
 
-        <!-- Delete confirm dialog -->
-        <dialog
-            v-if="asset"
-            ref="deleteDialogRef"
-            class="rounded-lg p-6 backdrop:bg-foreground/40"
-            aria-labelledby="delete-title"
-            aria-describedby="delete-desc"
-            data-testid="delete-confirm-dialog"
-            @cancel.prevent="closeDeleteDialog"
-        >
-            <h2 id="delete-title" class="text-base font-semibold">{{ t('Delete asset?') }}</h2>
-            <p id="delete-desc" class="mt-2 text-sm text-muted-foreground">
-                {{ t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') }) }}
-            </p>
-            <div class="mt-4 flex justify-end gap-2">
-                <button
-                    type="button"
-                    class="rounded px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
-                    data-testid="delete-cancel"
-                    @click="closeDeleteDialog"
-                >
-                    {{ t('Cancel') }}
-                </button>
-                <button
-                    type="button"
-                    class="rounded bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
-                    data-testid="delete-confirm"
-                    @click="confirmDelete"
-                >
-                    {{ t('Delete') }}
-                </button>
-            </div>
-        </dialog>
+        <!--
+          Delete confirm dialog.
 
-        <!-- Toast -->
-        <output
-            v-if="toast"
-            aria-live="polite"
-            class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg"
-            data-testid="media-toast"
-        >
-            {{ toast }}
-        </output>
+          The centring is explicit: a native `<dialog>` is centred by the
+          browser's own `margin: auto`, and the host's preflight resets
+          `margin: 0` on every element — so without this the dialog
+          sticks to the upper left corner. The same shape as the upload
+          dialog: a stripped `<dialog>` around a fixed, centred backdrop.
+        -->
+        <MediaDeleteDialog
+            v-if="asset && deleteDialogOpen"
+            :title="t('Delete asset?')"
+            :description="t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') })"
+            @confirm="confirmDelete"
+            @close="closeDeleteDialog"
+        />
+
+        <MediaToast :message="toast" />
     </div>
 </template>

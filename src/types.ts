@@ -8,6 +8,48 @@
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'unknown'
 
 /**
+ * The advisory mark on an asset (`media_assets.kind`).
+ *
+ * The vocabulary is closed: core's `MediaAssetKind` lists exactly these
+ * three values and the PATCH surface refuses anything else with a 422.
+ * The mark is a *hint* for the operator UI — nothing in the read or the
+ * write path refuses an asset because of it.
+ */
+export type MediaAssetKind = 'asset' | 'template' | 'example'
+
+/**
+ * A folder of the media library's tree.
+ *
+ * The listing endpoint returns the principal's folders **flat** and
+ * ordered by `path`; the tree is rebuilt on the client from
+ * `parent_id` (see `lib/folder-tree.ts`). `path` is the folder's path
+ * from the tenant root (`/Corporate`, `/Corporate/2026`).
+ *
+ * `asset_count` counts the assets filed *directly* in the folder — the
+ * assets of a subfolder are counted in that subfolder.
+ */
+export interface MediaFolder {
+    id: string
+    name: string
+    path: string
+    parent_id: string | null
+    asset_count: number
+}
+
+/**
+ * A folder with the principal that owns it.
+ *
+ * The server's listing is principal-scoped — the panel asks once per
+ * visible principal — and does not carry the principal itself. The panel
+ * adds it, because `path` is unique per principal and not globally: two
+ * principals may own a folder with the same name, and only the principal
+ * tells the two apart.
+ */
+export interface ScopedMediaFolder extends MediaFolder {
+    principal_id: number
+}
+
+/**
  * Wire shape for a single derivative row returned inside
  * `MediaAsset.derivatives[]` (see `MediaAssetSerializer::serialize()`
  * in spora-core). The set of formats is open — `string` because a
@@ -44,6 +86,13 @@ export type StorageMode = 'local' | 'data_url' | 'external'
 export interface MediaAsset {
     id: string
     user_id?: number | null
+    /**
+     * The principal the asset belongs to — the tenant it is filed under
+     * and the principal whose folders it can be filed into. The server
+     * scopes a folder write by it, so a folder of another principal is
+     * refused.
+     */
+    principal_id?: number | null
     media_type: MediaType
     mime_type: string | null
     byte_size: number | null
@@ -65,6 +114,19 @@ export interface MediaAsset {
     task_id: string | null
     tool_call_id: string | null
     created_at: string
+    /**
+     * The folder the asset is filed in, or `null` for the root.
+     *
+     * Carried by core's `MediaAssetSerializer` since the folders
+     * release. The panel talks to a core that may predate it, so the
+     * field is optional: an absent `folder_id` reads as "no folder".
+     */
+    folder_id?: string | null
+    /**
+     * The advisory mark. Absent on a core that predates the kinds
+     * release — the server's default is `asset`.
+     */
+    kind?: MediaAssetKind
     /**
      * `true` iff the asset is on the temporary-file purge path — see
      * spora-core PR #238. The list endpoint filters these out by
@@ -156,4 +218,44 @@ export interface MediaListQuery {
      * repeated-key wire shape the controller intersects.
      */
     principalIds?: number[]
+    /**
+     * The folder the listing is scoped to, or `null` for every
+     * folder. Sent as the scalar `?folder_id=` — the array-bracket
+     * form is deliberately not used: a multi-folder filter would need
+     * a `WHERE folder_id IN (…)`, and a half-implemented one that
+     * silently returns a single folder's rows is worse than none.
+     */
+    folderId?: string | null
+    /**
+     * Scope the listing to the assets filed in **no** folder. Sent as
+     * `?unfiled=true`.
+     *
+     * The server ignores it when a `folder_id` is sent — a folder is
+     * the more specific filter — so the two never travel together.
+     */
+    unfiled?: boolean
+    /**
+     * The advisory mark the listing is scoped to, or `''` for every
+     * mark. One value per request; an unknown value is dropped by the
+     * server and the listing stays unfiltered.
+     */
+    kind?: MediaAssetKind | ''
 }
+
+/**
+ * Which slice of the library the listing shows.
+ *
+ * - `all` — everything the principal scope allows
+ * - `folder` — the assets filed in one folder
+ * - `unfiled` — the assets filed in no folder
+ *
+ * The third state is not a corner case: a library that has just been
+ * given folders holds most of its assets in none of them, and "show me
+ * what is not filed yet" is the first question an operator asks while
+ * sorting. It is a different question from "show me a folder", so it
+ * gets its own state rather than a folder id that means "no folder".
+ */
+export type MediaFolderFilter =
+    | { kind: 'all' }
+    | { kind: 'folder'; id: string }
+    | { kind: 'unfiled' }

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import MediaUploadDialog from '../../src/components/MediaUploadDialog.vue'
-import type { MediaAsset, MediaPrincipal } from '../../src/types'
+import type { MediaAsset, MediaFolder, MediaPrincipal } from '../../src/types'
 import type { PluginHostContext } from '../../src/shims'
 
 const principals: MediaPrincipal[] = [
@@ -52,6 +52,21 @@ interface DialogProps {
     principals: MediaPrincipal[]
     groupLabels: Record<number, string>
     defaultPrincipalId: number | null
+    foldersByPrincipal: Record<number, MediaFolder[]>
+}
+
+/**
+ * The folders of each principal, mirroring what the server answers
+ * per principal.
+ */
+const foldersByPrincipal: Record<number, MediaFolder[]> = {
+    101: [
+        { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+        { id: 'folder-2', name: '2026', path: '/Corporate/2026', parent_id: 'folder-1', asset_count: 1 },
+    ],
+    202: [
+        { id: 'folder-3', name: 'Brand', path: '/Brand', parent_id: null, asset_count: 4 },
+    ],
 }
 
 function buildHost(overrides?: {
@@ -95,6 +110,7 @@ function dialogProps(harness: Harness, defaultPrincipalId: number | null): Dialo
         principals,
         groupLabels,
         defaultPrincipalId,
+        foldersByPrincipal,
     }
 }
 
@@ -128,6 +144,22 @@ function fileInput(): HTMLInputElement {
 
 function principalSelect(): HTMLSelectElement {
     return document.querySelector('[data-testid="upload-principal-select"]') as HTMLSelectElement
+}
+
+function folderToggle(): HTMLButtonElement {
+    return document.querySelector('[data-testid="upload-folder-toggle"]') as HTMLButtonElement
+}
+
+function folderOption(id: string): HTMLButtonElement {
+    return document.querySelector(`[data-testid="upload-folder-option-${id}"]`) as HTMLButtonElement
+}
+
+/**
+ * Open the folder picker's menu and wait for it to render.
+ */
+async function openFolderMenu(): Promise<void> {
+    folderToggle().click()
+    await flushPromises()
 }
 
 function uploadDialog(): HTMLDialogElement {
@@ -359,6 +391,149 @@ describe('MediaUploadDialog', () => {
         await flushPromises()
         expect(dialog.open).toBe(false)
         expect(wrapper.emitted('close')).toBeDefined()
+        wrapper.unmount()
+    })
+
+    it('offers the folders of the selected principal', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        await openFolderMenu()
+        const options = Array.from(document.querySelectorAll('[data-testid^="upload-folder-option-"]'))
+        // The root plus the folders of principal 101, in tree order.
+        expect(options.map((option) => option.getAttribute('data-testid'))).toEqual([
+            'upload-folder-option-root',
+            'upload-folder-option-folder-1',
+            'upload-folder-option-folder-2',
+        ])
+        expect(options[0]?.textContent).toContain('No folder')
+        expect(options[1]?.textContent).toContain('Corporate')
+        expect(options[2]?.textContent).toContain('2026')
+        wrapper.unmount()
+    })
+
+    it('draws the folder tree, so a nested folder is not mistaken for a top-level one', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        await openFolderMenu()
+        const indent = (testid: string): number => {
+            const style = (document.querySelector(`[data-testid="${testid}"]`) as HTMLElement).style
+            return Number.parseFloat(style.paddingLeft)
+        }
+        expect(indent('upload-folder-option-folder-2')).toBeGreaterThan(indent('upload-folder-option-folder-1'))
+        wrapper.unmount()
+    })
+
+    it('sends the picked folder with the upload', async () => {
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        await openFolderMenu()
+        folderOption('folder-1').click()
+        await flushPromises()
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBe('folder-1')
+        wrapper.unmount()
+    })
+
+    it('lands the upload in the folder the panel is scoped to', async () => {
+        // The operator is looking at a folder, so that is where the file
+        // belongs — the panel's folder is the upload's default.
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: { ...dialogProps(harness, 101), defaultFolderId: 'folder-2' },
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        // The path, so the tree is visible with the menu closed.
+        expect(folderToggle().textContent).toContain('Corporate/2026')
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBe('folder-2')
+        wrapper.unmount()
+    })
+
+    it('drops the panel folder when another principal owns it', async () => {
+        // The upload is filed under a principal the server would refuse
+        // the folder for, so the default cannot apply.
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: { ...dialogProps(harness, 202), defaultFolderId: 'folder-1' },
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBeNull()
+        wrapper.unmount()
+    })
+
+    it('sends no folder when the unfiled option is picked', async () => {        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        const file = new File(['b'], 'shot.png', { type: 'image/png' })
+        setInputFiles(fileInput(), file)
+        fireChange(fileInput())
+        await flushPromises()
+        submitForm().click()
+        await flushPromises()
+        const [, form] = harness.api.postForm.mock.calls[0] ?? []
+        expect((form as FormData).get('folder_id')).toBeNull()
+        wrapper.unmount()
+    })
+
+    it('drops the folder when the principal changes', async () => {
+        // The folder belongs to a principal; the server refuses a
+        // folder of another one.
+        const harness = buildHost()
+        const wrapper = mount(MediaUploadDialog, {
+            props: dialogProps(harness, 101),
+            attachTo: document.body,
+        })
+        wrapper.vm.open()
+        await flushPromises()
+        await openFolderMenu()
+        folderOption('folder-1').click()
+        await flushPromises()
+        principalSelect().value = '202'
+        principalSelect().dispatchEvent(new Event('change', { bubbles: true }))
+        await flushPromises()
+        expect(folderToggle().textContent).toContain('No folder')
         wrapper.unmount()
     })
 })

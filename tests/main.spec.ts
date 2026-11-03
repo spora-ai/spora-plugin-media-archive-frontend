@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MediaGrid from '../src/components/MediaGrid.vue'
 import MediaCard from '../src/components/MediaCard.vue'
-import MediaFilters from '../src/components/MediaFilters.vue'
+import MediaToolbar from '../src/components/MediaToolbar.vue'
 import type { MediaAsset } from '../src/types'
 
 const sample: MediaAsset = {
@@ -32,6 +32,17 @@ describe('MediaGrid', () => {
     it('renders the empty state when no assets', () => {
         const wrapper = mount(MediaGrid, { props: { assets: [] } })
         expect(wrapper.find('[data-testid="media-grid-empty"]').exists()).toBe(true)
+        expect(wrapper.text()).toContain('No media yet')
+    })
+
+    it('says the folder is empty rather than the archive when a folder is scoped', () => {
+        // "No media yet — generate something with a companion plugin" is
+        // wrong for an empty folder in a full archive.
+        const wrapper = mount(MediaGrid, { props: { assets: [], filter: { kind: 'folder', id: 'folder-1' } } })
+        const empty = wrapper.find('[data-testid="media-grid-empty"]')
+        expect(empty.exists()).toBe(true)
+        expect(empty.text()).toContain('This folder is empty.')
+        expect(empty.text()).not.toContain('No media yet')
     })
 
     it('renders one card per asset', () => {
@@ -52,48 +63,38 @@ describe('MediaGrid', () => {
     })
 })
 
-describe('MediaFilters', () => {
-    it('emits update:type when a pill is clicked', async () => {
-        const wrapper = mount(MediaFilters, {
+describe('MediaToolbar', () => {
+    function mountToolbar(props: { type?: string; search?: string } = {}) {
+        return mount(MediaToolbar, {
             props: {
-                type: '',
-                search: '',
+                type: (props.type ?? '') as 'image' | 'audio' | 'video' | 'document' | 'unknown' | '',
+                search: props.search ?? '',
+                kind: '',
                 principals: [],
                 selectedScope: null,
                 groupLabels: {},
             },
         })
-        await wrapper.find('[data-testid="media-type-image"]').trigger('click')
+    }
+
+    it('emits update:type when a type is picked in the dropdown', async () => {
+        const wrapper = mountToolbar()
+        await wrapper.find('[data-testid="media-type-select-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-type-select-option-image"]').trigger('click')
         expect(wrapper.emitted('update:type')?.[0]?.[0]).toBe('image')
     })
 
     it('emits update:search as the user types', async () => {
-        const wrapper = mount(MediaFilters, {
-            props: {
-                type: '',
-                search: '',
-                principals: [],
-                selectedScope: null,
-                groupLabels: {},
-            },
-        })
+        const wrapper = mountToolbar()
         const input = wrapper.find('[data-testid="media-search"]')
         await input.setValue('alpaca')
         expect(wrapper.emitted('update:search')?.[0]?.[0]).toBe('alpaca')
     })
 
-    it('marks the active pill', () => {
-        const wrapper = mount(MediaFilters, {
-            props: {
-                type: 'audio',
-                search: '',
-                principals: [],
-                selectedScope: null,
-                groupLabels: {},
-            },
-        })
-        const audio = wrapper.find('[data-testid="media-type-audio"]')
-        expect(audio.classes()).toContain('bg-primary')
+    it('names the active type on the dropdown trigger', () => {
+        const wrapper = mountToolbar({ type: 'audio' })
+        const trigger = wrapper.find('[data-testid="media-type-select-toggle"]')
+        expect(trigger.text()).toContain('Audio')
     })
 })
 

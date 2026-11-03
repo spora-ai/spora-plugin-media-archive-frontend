@@ -13,6 +13,7 @@ Pre-built Vue SPA for the Spora **Media Archive** admin panel. Delivered as a Co
 The detail drawer (right-side panel that opens when a card is selected) covers the operational lifecycle of a media asset:
 
 - Inline rename of the filename, tags, and prompt via accessible `<form>` edit patterns (click-to-edit, Esc/Cancel reverts).
+- The asset's folder and its kind, both editable: a `<select>` beside each other, one that PATCHes `{"folder_id": …}` and one that PATCHes `{"kind": …}`. The folder picker offers the folders of the **asset's** principal — the server scopes a folder write by it and refuses a folder of another principal, so offering them would be offering a refusal.
 - Public-share toggle, copy-URL, and token rotation — all routed through the host's typed API client (`hostContext.api`) so CSRF, base URL, and envelope unwrap are handled centrally.
 - Delete confirmation via a real `<dialog>` element (replaces the old `window.confirm`) with a focus-trapped Cancel/Delete pair.
 - Lightbox preview for image and video assets with `aria-modal="true"`, save-and-restore focus on close, and `Escape` / click-outside dismissal.
@@ -27,15 +28,207 @@ The detail drawer (right-side panel that opens when a card is selected) covers t
 
 - The grid renders 24 rows per page; if the response carries `lastPage > 1` a 'Load more' button appears under the cards with a 'Showing N of total' counter.
 - Clicking appends the next page; rows are deduplicated by id against the existing rows so a concurrent insert landing the same row on consecutive pages doesn't render it twice.
-- Filter changes (type pill, search, scope chip) reset to page 1 — the Load-more button disappears when `lastPage` drops back to 1.
+- Filter changes (file type, kind, folder, search, scope) reset to page 1 — the Load-more button disappears when `lastPage` drops back to 1.
 
-## Scope chip row
+## The panel's shape
 
-The grid mounts a dashboard-style `ALL / My Media / Group A / …` chip row above the search input:
+The panel is a **folder rail** on the left and the **grid** on the right:
 
-- Pulls `/principals/me` + `/groups` on mount to populate the chip labels; both calls are best-effort so a transient failure leaves the empty-label fallback (`Group #N`) without blocking the grid.
-- Translates the single-pick chip state into repeated `?principal_id=` keys on the listing request — `ALL` sends every visible principal, `My Media` sends just the user-principal, a group chip sends just that group's principal. The controller intersects with `visiblePrincipalIds()`, so an out-of-scope id never reaches the service.
-- Click-the-active-chip-to-clear: matches the dashboard's flag-chip toggle behaviour.
+```
+┌──────────────────┬──────────────────────────────────────────┐
+│ [scope dropdown] │ [search]  [All file types ▾] [All kinds ▾] │
+│ FOLDERS  + New   │ ┌────┐ ┌────┐ ┌────┐ ┌────┐              │
+│  All media   32  │ │card│ │card│ │card│ │card│              │
+│  ▸ My Media    4  │ └────┘ └────┘ └────┘ └────┘              │
+│    Brand      3  │                                          │
+│    Fonts      2  │                                          │
+│  ▸ Test Group  2 │                                          │
+│    Shared     4  │                                          │
+└──────────────────┴──────────────────────────────────────────┘
+```
+
+- The **scope dropdown sits at the top of the rail**, above the "Folders"
+  heading, because it governs the whole panel: the folders in the tree
+  *and* the assets in the grid. It is the Custom Skills panel's scope
+  control (avatar, name, kind), not a chip row — a chip row reads as a
+  filter, and a filter does not say "everything below this belongs to what
+  I picked".
+- The **file type and the kind are dropdowns** in the toolbar, in the
+  Custom Skills style: a bordered `h-8` control with a chevron.
+- The **rail becomes a drawer** below `lg`: 256px is most of a phone's
+  width. It slides in from the left, and the toolbar carries a compact
+  copy of the scope so the panel still says whose media it is showing
+  while the drawer is closed. Escape closes an open menu first and the
+  drawer second.
+
+### Scope
+
+The scope dropdown replaces the old `ALL / My Media / Group A / …` chip
+row:
+
+- Pulls `/principals/me` + `/groups` on mount to populate the labels;
+  both calls are best-effort so a transient failure leaves the empty-label
+  fallback (`Group #N`) without blocking the grid.
+- Translates the single-pick scope state into repeated `?principal_id=`
+  keys on the listing request — "all principals" sends every visible
+  principal, "My Media" sends just the user-principal, a group sends just
+  that group's principal. The controller intersects with
+  `visiblePrincipalIds()`, so an out-of-scope id never reaches the
+  service.
+
+### Folder tree
+
+The rail carries a tree of the media library's folders, built on the
+client from the flat `parent_id` list the server returns:
+
+- `GET /media/folders?principal_id=…` answers per principal, so the panel
+  asks once per visible principal and keeps the answers apart. The tree
+  shows the folders of the principals **in scope**: a folder of a
+  principal outside the scope would filter the listing down to nothing,
+  so it is not offered.
+- **A folder belongs to a principal**, so the tree shows that ownership
+  structurally. In one principal's scope the tree is that principal's
+  folders; in the "all principals" scope it is *grouped* — each principal
+  a heading, its folders under it — because two principals may own
+  folders with the same name. The server intersects the folder filter
+  with the principal scope, so a folder outside it yields no rows and no
+  hint that it exists.
+- The group heading carries the number of **folders** that principal owns
+  and picks the scope when it is clicked. It cannot carry an asset count:
+  the panel is only told the total of the listing it just fetched, and
+  that total is filtered by the scope, the type, the kind and the search
+  — it is not the principal's holding.
+- The tree's root is the whole library; picking a folder sends the
+  scalar `?folder_id=<uuid>`. The array-bracket form is deliberately not
+  used — a multi-folder filter would need a `WHERE folder_id IN (…)`,
+  and a half-implemented one that silently returns a single folder's rows
+  is worse than none.
+- Each folder shows the number of assets filed *directly* in it, and the
+  root carries no count (the endpoint does not report one).
+- Changing the scope drops a folder selection the new scope cannot filter
+  by.
+
+### Creating a folder
+
+The rail's **New folder** button opens a dialog — the upload dialog's
+shape, because both are the operator's dialog:
+
+- The name, the principal the folder belongs to, and the parent it sits
+  under. A folder always belongs to one principal, so the principal is
+  part of the form.
+- The parent is chosen from a **tree picker**, not a `<select>`: a select
+  cannot show the tree, and the tree is the thing being chosen between.
+- The path preview shows what the folder will be called before it is
+  called.
+- `POST /media/folders` answers 422 `NOT_UNIQUE` for a sibling name that
+  is taken, and the dialog says so in the operator's words.
+
+### Filing an asset into a folder
+
+Two ways, both making the same `PATCH /media/{id}` with a `folder_id`:
+
+- **The detail page** — a picker beside the kind, offering the folders of
+  the asset's own principal.
+- **Drag and drop** — a card is dragged out of the grid onto a folder row
+  in the rail, and the row lights up under the pointer. Dropping on
+  **All media** takes the asset out of its folder. The write is scoped by
+  the asset's principal, so a folder of another principal is refused.
+
+HTML drag and drop needs a mouse; on a touch screen the detail page's
+picker is the way.
+
+### Picking a folder
+
+`MediaFolderPicker.vue` is the one component that picks a folder, and the
+detail page and the upload dialog both use it. It draws the tree the
+folders' `parent_id` describes, indented — a `<select>` lists the folders
+flat, and a folder called "2026" under "Corporate" would be
+indistinguishable from one under "Templates".
+
+- The trigger shows the chosen folder's **path**, so the tree is still
+  readable once the menu is closed.
+- The menu lists the folders of one principal, indented by their depth,
+  with each folder's asset count and a tick on the chosen one.
+- The top row, **No folder**, takes the asset out of its folder.
+- A chosen folder that resolves to nothing is listed on its own row as
+  **Unknown folder**: the asset is filed in a folder the panel cannot
+  see, and "No folder" would be a false claim.
+
+### The folder filter
+
+The rail offers two roots: **All media** (the whole library) and **All
+media without a folder** (the assets filed in no folder). They are
+exclusive on the wire — `?folder_id=` names one folder, `?unfiled=true`
+names the assets in none, and the server ignores the flag when a folder
+is named.
+
+`MediaFolderFilter` (`{ kind: 'all' | 'folder' | 'unfiled' }`) is the one
+value the rail, the grid and the drag-and-drop work with; the wire query
+keeps the two filters apart because the server does.
+
+### Selecting several assets
+
+The toolbar's **Select** button turns the selection mode on. Every card
+grows a tick, a click toggles the asset instead of opening its detail
+page, and the bar under the toolbar counts the selection and offers
+**Move to folder** and **Delete**.
+
+- The move opens `MediaMoveDialog.vue`, which uses the folder picker.
+  A folder belongs to one principal and the server scopes a folder write
+  by the asset's principal, so a selection spanning principals asks which
+  principal's folders to use and the other assets stay where they are.
+- The delete asks first, through `MediaDeleteDialog.vue` — the same
+  component the detail page's single delete uses.
+- Both are one request per asset: the server's endpoints are
+  single-asset, and a batch endpoint would have to say what it does when
+  one of the assets is not the caller's. The toast counts what happened:
+  filed, skipped, refused.
+- After a bulk action the grid is asked again: the listing is a page of
+  a filtered set, and filing an asset elsewhere takes it out of the
+  listing.
+
+### Kind filter
+
+An `asset / template / example` dropdown in the toolbar, plus an
+unfiltered state:
+
+- The mark is advisory — nothing in the read or the write path refuses an
+  asset because of it — and the operator owns it, so the detail page
+  offers it as a select that PATCHes `{"kind": …}`.
+- The listing request carries one `?kind=` value; the server drops an
+  unknown one and leaves the listing unfiltered.
+
+## Tailwind and the transform defaults
+
+The plugin ships **no preflight** — the host owns the document-level
+resets — and Tailwind v3 emits its `--tw-translate-x`, `--tw-rotate`,
+`--tw-scale-x` defaults in the same base rule as its preflight. A
+transform utility reads them:
+
+```css
+.-translate-x-full {
+  --tw-translate-x: -100%;
+  transform: translate(var(--tw-translate-x), var(--tw-translate-y))
+             rotate(var(--tw-rotate)) …;
+}
+```
+
+Without the defaults the declaration references variables that do not
+exist, so it is invalid at computed-value time and the element keeps
+`transform: none` — the utility silently does nothing. The host's
+Tailwind v4 does not define them either, so there is nothing to borrow.
+
+The panel therefore avoids transform utilities altogether: centring is
+`inset-y-0 my-auto`, and the drawer slides on `left`. That is why the
+search icon sits centred in its field instead of half a line off, and why
+the drawer goes off-screen on a narrow one.
+
+## Upload
+
+- The upload dialog attributes the file to one of the operator's visible principals, and can file it into one of **that** principal's folders. The picker offers only the selected principal's folders — the server files the upload into the principal the form names and refuses a folder of another one, so offering them would be offering a 422.
+- Changing the principal drops the picked folder.
+- The folder is picked with `MediaFolderPicker.vue`, the same component the
+  detail page uses, so the upload offers the same tree.
 
 ## Build
 
@@ -45,7 +238,11 @@ npm run build   # writes frontend/main.js + frontend/style.css
 npm run smoke   # asserts window.SporaAppMediaArchive.mount is a function
 ```
 
-The build output (`main.js` + `style.css`) is committed to this repo. Operators get the new bundle on the next `composer update`.
+The build output (`main.js` + `style.css`) is **not** committed — it is
+gitignored and built by the release workflow, which packs `frontend/`
+verbatim into the GitHub Release tarball the Composer package points at.
+Operators get the new bundle on the next `composer update`. See
+[RELEASING.md](./RELEASING.md).
 
 ## Dev mode (plugin author)
 

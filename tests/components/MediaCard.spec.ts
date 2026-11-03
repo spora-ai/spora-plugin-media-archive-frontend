@@ -94,3 +94,64 @@ describe('MediaCard.vue Temporary badge', () => {
         expect(wrapper.find('[data-testid="media-card-temporary-badge"]').exists()).toBe(false)
     })
 })
+
+describe('MediaCard.vue folder badge', () => {
+    it('shows the name of the folder the asset is filed in', () => {
+        const wrapper = mount(MediaCard, {
+            props: {
+                asset: makeAsset({ folder_id: 'folder-1' }),
+                folder: { id: 'folder-1', name: 'Corporate', path: '/Corporate', parent_id: null, asset_count: 2 },
+            },
+        })
+        const badge = wrapper.find('[data-testid="media-card-folder"]')
+        expect(badge.exists()).toBe(true)
+        expect(badge.text()).toContain('Corporate')
+    })
+
+    it('shows no badge for an asset in the root', () => {
+        const wrapper = mount(MediaCard, {
+            props: { asset: makeAsset({ folder_id: null }), folder: null },
+        })
+        expect(wrapper.find('[data-testid="media-card-folder"]').exists()).toBe(false)
+    })
+})
+describe('MediaCard.vue selection', () => {
+    it('opens the detail page when the card is not a selection target', async () => {
+        const wrapper = mount(MediaCard, { props: { asset: makeAsset() } })
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        expect(wrapper.emitted('select')).toHaveLength(1)
+        expect(wrapper.emitted('toggle-select')).toBeUndefined()
+    })
+
+    it('toggles the selection instead of opening the detail page', async () => {
+        const wrapper = mount(MediaCard, { props: { asset: makeAsset(), selectable: true } })
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        expect(wrapper.emitted('toggle-select')).toHaveLength(1)
+        expect(wrapper.emitted('select')).toBeUndefined()
+    })
+
+    it('shows the selection mark only when the card is a selection target', () => {
+        const plain = mount(MediaCard, { props: { asset: makeAsset() } })
+        expect(plain.find('[data-testid="media-card-selection"]').exists()).toBe(false)
+
+        const selectable = mount(MediaCard, { props: { asset: makeAsset(), selectable: true } })
+        expect(selectable.find('[data-testid="media-card-selection"]').exists()).toBe(true)
+    })
+
+    it('says whether the asset is selected', () => {
+        const wrapper = mount(MediaCard, {
+            props: { asset: makeAsset(), selectable: true, selected: true },
+        })
+        const card = wrapper.find('[data-testid="media-card-asset-1"]')
+        expect(card.attributes('aria-pressed')).toBe('true')
+        expect(card.classes()).toContain('ring-primary')
+    })
+
+    it('is not draggable while it is a selection target', () => {
+        const plain = mount(MediaCard, { props: { asset: makeAsset() } })
+        expect(plain.find('[data-testid="media-card-asset-1"]').attributes('draggable')).toBe('true')
+
+        const selectable = mount(MediaCard, { props: { asset: makeAsset(), selectable: true } })
+        expect(selectable.find('[data-testid="media-card-asset-1"]').attributes('draggable')).toBe('false')
+    })
+})

@@ -19,8 +19,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Upload, X } from 'lucide-vue-next'
-import type { MediaAsset, MediaPrincipal } from '../types'
+import type { MediaAsset, MediaFolder, MediaPrincipal } from '../types'
 import type { PluginHostContext } from '../shims'
+import MediaFolderPicker from './MediaFolderPicker.vue'
 
 interface AllowedTypes {
     mime_types: string[]
@@ -47,9 +48,25 @@ interface Props {
      * in the same scope the operator was already browsing.
      */
     defaultPrincipalId: number | null
+    /**
+     * The folder the panel is scoped to, if any. The upload lands in it
+     * — the operator is looking at that folder, so that is where the
+     * file belongs.
+     */
+    defaultFolderId?: string | null
+    /**
+     * The folders of the visible principals, keyed by principal id.
+     * The picker offers the folders of the selected principal, so the
+     * upload is filed into a folder of the principal it lands in —
+     * the server refuses a folder of another principal.
+     */
+    foldersByPrincipal?: Record<number, MediaFolder[]>
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+    defaultFolderId: null,
+    foldersByPrincipal: () => ({}),
+})
 
 const emit = defineEmits<{
     (event: 'uploaded', asset: MediaAsset): void
@@ -61,6 +78,8 @@ const { t } = useI18n()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const file = ref<File | null>(null)
 const principalId = ref<number | null>(null)
+/** The picked folder id, or `null` for the root. */
+const folderId = ref<string | null>(null)
 const prompt = ref('')
 const tags = ref('')
 const uploading = ref(false)
@@ -96,6 +115,17 @@ const principalOptions = computed(() =>
 )
 
 /**
+ * The folders the selected principal owns.
+ *
+ * Only the selected principal's folders are offered: the server files
+ * the upload into the principal the form names and refuses a folder of
+ * another one, so offering them would be offering a 422.
+ */
+const principalFolders = computed<MediaFolder[]>(() =>
+    principalId.value === null ? [] : props.foldersByPrincipal[principalId.value] ?? [],
+)
+
+/**
  * Resolve `defaultPrincipalId` against the actual principal list. The
  * caller may pass a stale id (operator toggled to ALL between dialog
  * open and state init); we silently downgrade to the user-principal /
@@ -111,6 +141,27 @@ function resolveInitialPrincipal(): number | null {
         return userPrincipal.id
     }
     return props.principals[0]?.id ?? null
+}
+
+/**
+ * The folder the upload lands in, or `null` for the root.
+ *
+ * The panel's folder is the operator's context, so an upload belongs in
+ * it. A folder of another principal cannot be used — the server refuses
+ * it — so the default only applies when the principal the upload is
+ * filed under owns it.
+ */
+function resolveInitialFolder(): string | null {
+    const folder = props.defaultFolderId
+    if (folder === null || folder === '') {
+        return null
+    }
+    const principal = principalId.value
+    if (principal === null) {
+        return null
+    }
+    const owned = props.foldersByPrincipal[principal] ?? []
+    return owned.some((candidate) => candidate.id === folder) ? folder : null
 }
 
 async function loadAllowedTypes(): Promise<void> {
@@ -138,6 +189,7 @@ function open(): void {
     prompt.value = ''
     tags.value = ''
     principalId.value = resolveInitialPrincipal()
+    folderId.value = resolveInitialFolder()
     void loadAllowedTypes()
     dialogRef.value?.showModal()
 }
@@ -195,6 +247,9 @@ async function submit(): Promise<void> {
         const form = new FormData()
         form.append('file', picked)
         form.append('principal_id', String(principal))
+        if (folderId.value !== null) {
+            form.append('folder_id', folderId.value)
+        }
         if (picked.name !== '') {
             form.append('filename', picked.name)
         }
@@ -240,6 +295,14 @@ watch(() => props.principals, () => {
         || !props.principals.some((p) => p.id === principalId.value)) {
         principalId.value = resolveInitialPrincipal()
     }
+})
+
+// The chosen folder belongs to a principal; changing the principal
+// invalidates it, and a folder of another principal is refused by the
+// server. The panel's folder comes back when the new principal owns
+// it — the operator is still in that folder.
+watch(principalId, () => {
+    folderId.value = resolveInitialFolder()
 })
 
 onBeforeUnmount(() => {
@@ -310,6 +373,23 @@ onBeforeUnmount(() => {
                             </option>
                         </select>
                     </label>
+
+                    <!--
+                      A `<div>`, not a `<label>`: the picker is a button,
+                      and a wrapping label would forward its own click to
+                      that button — opening the menu and closing it again
+                      in the same event.
+                    -->
+                    <div class="flex flex-col gap-1 text-xs text-muted-foreground">
+                        <span>{{ t('Folder (optional)') }}</span>
+                        <MediaFolderPicker
+                            :folders="principalFolders"
+                            :model-value="folderId"
+                            :label="t('Folder (optional)')"
+                            testid="upload-folder"
+                            @update:model-value="folderId = $event"
+                        />
+                    </div>
 
                     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
                         {{ t('Prompt (optional)') }}

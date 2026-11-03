@@ -3,6 +3,19 @@
  * bundle omits preflight. `tailwind.config.ts` scopes every generated utility
  * beneath `#spora-plugin-media-archive` to prevent plugin classes from
  * overriding the host SPA or another plugin.
+ *
+ * The panel deliberately avoids Tailwind's transform utilities
+ * (`translate-*`, `rotate-*`, `scale-*`). They read `--tw-translate-x`,
+ * `--tw-rotate` and friends, and Tailwind v3 defines those in the same base
+ * rule as its preflight — which this bundle omits. Without them the
+ * `transform` declaration is invalid at computed-value time and the element
+ * keeps `transform: none`, so the utility silently does nothing: an icon
+ * meant to be centred sits half a line off, and a drawer meant to slide off
+ * the screen stays on it. The host's Tailwind v4 does not define those
+ * variables either, so there is nothing to borrow.
+ *
+ * Centring and off-canvas placement are therefore done with `inset-y-0
+ * my-auto` and `left` — plain CSS that needs no transform.
  */
 @tailwind components;
 @tailwind utilities;

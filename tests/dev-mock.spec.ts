@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createMockApi, filterFixture, FIXTURE, paginate, parseListQuery } from '../src/dev-mock'
-import type { MediaAsset, MediaListResponse } from '../src/types'
+import type { MediaAsset, MediaFolder, MediaListResponse, MediaPrincipal } from '../src/types'
 
 describe('parseListQuery', () => {
     it('returns defaults when path has no query string', () => {
@@ -8,6 +8,9 @@ describe('parseListQuery', () => {
             type: '',
             plugin: '',
             search: '',
+            folderId: '',
+            unfiled: false,
+            kind: '',
             scope: 'all',
             page: 1,
             perPage: 24,
@@ -15,14 +18,23 @@ describe('parseListQuery', () => {
     })
 
     it('extracts each supported param', () => {
-        expect(parseListQuery('/media?type=audio&plugin=minimax&search=hello&page=2&per_page=5')).toEqual({
+        expect(parseListQuery('/media?type=audio&plugin_slug=minimax&q=hello&page=2&per_page=5')).toEqual({
             type: 'audio',
             plugin: 'minimax',
             search: 'hello',
+            folderId: '',
+            unfiled: false,
+            kind: '',
             scope: 'all',
             page: 2,
             perPage: 5,
         })
+    })
+
+    it('parses the unfiled filter', () => {
+        expect(parseListQuery('/media?unfiled=true').unfiled).toBe(true)
+        expect(parseListQuery('/media?unfiled=false').unfiled).toBe(false)
+        expect(parseListQuery('/media').unfiled).toBe(false)
     })
 
     it('parses scope=mine and defaults to all', () => {
@@ -32,7 +44,7 @@ describe('parseListQuery', () => {
     })
 
     it('lowercases and trims the search term', () => {
-        expect(parseListQuery('/media?search=  Hello  ').search).toBe('hello')
+        expect(parseListQuery('/media?q=  Hello  ').search).toBe('hello')
     })
 
     it('clamps page and per_page to a minimum of 1', () => {
@@ -51,40 +63,40 @@ describe('filterFixture', () => {
     const corpus: MediaAsset[] = FIXTURE
 
     it('returns the full fixture when no filters are set', () => {
-        expect(filterFixture({ type: '', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
+        expect(filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)).toHaveLength(corpus.length)
     })
 
     it('filters by media_type', () => {
-        const result = filterFixture({ type: 'image', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: '', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.length).toBeGreaterThan(0)
         expect(result.every((a) => a.media_type === 'image')).toBe(true)
     })
 
     it('filters by plugin_slug', () => {
-        const result = filterFixture({ type: '', plugin: 'tavily', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.plugin_slug === 'tavily')).toBe(true)
     })
 
     it('filters by case-insensitive prompt substring', () => {
-        const result = filterFixture({ type: '', plugin: '', search: 'alpine', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: '', plugin: '', search: 'alpine', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.some((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
         expect(result.every((a) => (a.prompt ?? '').toLowerCase().includes('alpine'))).toBe(true)
     })
 
     it('combines multiple filters with AND semantics', () => {
-        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const result = filterFixture({ type: 'image', plugin: 'minimax', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(result.every((a) => a.media_type === 'image' && a.plugin_slug === 'minimax')).toBe(true)
     })
 
     it('returns an empty array when nothing matches', () => {
-        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)).toEqual([])
+        expect(filterFixture({ type: 'image', plugin: 'tavily', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)).toEqual([])
     })
 
     it('filters by scope=mine to the current user only', () => {
-        const mine = filterFixture({ type: '', plugin: '', search: '', scope: 'mine', page: 1, perPage: 24 }, corpus)
+        const mine = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'mine', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(mine.length).toBeGreaterThan(0)
         expect(mine.every((a) => (a as unknown as { user_id: number }).user_id === 42)).toBe(true)
-        const all = filterFixture({ type: '', plugin: '', search: '', scope: 'all', page: 1, perPage: 24 }, corpus)
+        const all = filterFixture({ type: '', plugin: '', search: '', folderId: '', kind: '', scope: 'all', unfiled: false, page: 1, perPage: 24 }, corpus)
         expect(all.length).toBeGreaterThan(mine.length)
     })
 })
@@ -137,10 +149,102 @@ describe('createMockApi', () => {
         expect(page2.assets[0]?.id).not.toBe(page1.assets[0]?.id)
     })
 
-    it('rejects write verbs', async () => {
+    it('answers the principals endpoint so the folder tree has a principal', async () => {
+        const result = await api.get<{ principals: MediaPrincipal[] }>('/principals/me')
+        // A user-principal and a group-principal: the rail groups the
+        // tree by owner in the "all principals" scope, and one principal
+        // cannot show that.
+        expect(result.principals).toHaveLength(2)
+        expect(result.principals[0]?.type).toBe('user')
+        expect(result.principals[1]?.type).toBe('group')
+    })
+
+    it('answers the groups endpoint so the principals can be named', async () => {
+        // The panel keys a group's friendly name by its principal id, and
+        // falls back to `Group #N` without it.
+        const result = await api.get<{ groups: Array<{ id: number; name: string; principal_id: number }> }>('/groups')
+        expect(result.groups).toHaveLength(1)
+        expect(result.groups[0]?.principal_id).toBe(2)
+        expect(result.groups[0]?.name).toBe('Marketing Team')
+    })
+
+    it('returns the folder tree for the folders endpoint, per principal', async () => {
+        const mine = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=1')
+        expect(mine.folders.length).toBeGreaterThan(0)
+        expect(mine.folders[0]?.parent_id).toBeNull()
+
+        const group = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=2')
+        expect(group.folders.length).toBeGreaterThan(0)
+        expect(group.folders.map((folder) => folder.id)).not.toEqual(mine.folders.map((folder) => folder.id))
+    })
+
+    it('creates a folder under its parent and refuses a duplicate name', async () => {
+        const created = await api.post<MediaFolder>('/media/folders', {
+            name: 'Print',
+            parent_id: 'folder-corporate',
+            principal_id: 1,
+        })
+        expect(created.name).toBe('Print')
+        expect(created.path).toBe('/Corporate/Print')
+        expect(created.parent_id).toBe('folder-corporate')
+
+        const tree = await api.get<{ folders: MediaFolder[] }>('/media/folders?principal_id=1')
+        expect(tree.folders.map((folder) => folder.id)).toContain(created.id)
+
+        await expect(api.post('/media/folders', {
+            name: 'Print',
+            parent_id: 'folder-corporate',
+            principal_id: 1,
+        })).rejects.toThrow()
+    })
+
+    it('refuses a parent of another principal, as the server does', async () => {
+        await expect(api.post('/media/folders', {
+            name: 'Print',
+            parent_id: 'folder-shared',
+            principal_id: 1,
+        })).rejects.toThrow()
+    })
+
+    it('narrows results by ?folder_id=', async () => {
+        const result = await api.get<MediaListResponse>('/media?folder_id=folder-templates')
+        expect(result.assets.every((a) => a.folder_id === 'folder-templates')).toBe(true)
+        expect(result.total).toBe(result.assets.length)
+    })
+
+    it('narrows results by ?kind=', async () => {
+        const result = await api.get<MediaListResponse>('/media?kind=template')
+        expect(result.assets.every((a) => a.kind === 'template')).toBe(true)
+        expect(result.total).toBe(result.assets.length)
+    })
+
+    it('rejects write verbs it does not model', async () => {
         await expect(api.post('/media', {})).rejects.toThrow()
-        await expect(api.patch('/media/demo-1', {})).rejects.toThrow()
-        await expect(api.delete('/media/demo-1')).rejects.toThrow()
+    })
+
+    it('deletes an asset', async () => {
+        // Its own mock: the shared one is stateful, and a deleted row
+        // would be gone for the tests that follow.
+        const fresh = createMockApi()
+        const before = await fresh.get<MediaListResponse>('/media')
+        const target = before.assets[0]
+        expect(target).toBeDefined()
+        await fresh.delete(`/media/${target?.id}`)
+        const after = await fresh.get<MediaListResponse>('/media')
+        expect(after.assets.some((asset) => asset.id === target?.id)).toBe(false)
+    })
+
+    it('files an asset into a folder of its principal', async () => {
+        const filed = await api.patch<MediaAsset>('/media/demo-1', {
+            folder_id: 'folder-templates',
+        })
+        expect(filed.folder_id).toBe('folder-templates')
+        const listed = await api.get<MediaListResponse>('/media?folder_id=folder-templates')
+        expect(listed.assets.some((asset) => asset.id === 'demo-1')).toBe(true)
+    })
+
+    it('refuses a folder of another principal, as the server does', async () => {
+        await expect(api.patch('/media/demo-1', { folder_id: 'folder-shared' })).rejects.toThrow()
     })
 
     it('throws for unknown paths', async () => {
