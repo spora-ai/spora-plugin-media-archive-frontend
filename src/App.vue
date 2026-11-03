@@ -687,6 +687,24 @@ function onFolderCreated(payload: { folder: MediaFolder; principalId: number }):
 }
 
 /**
+ * Whether an asset still belongs in the listing.
+ *
+ * The listing is a filtered view, so filing an asset elsewhere takes it
+ * out of it: an asset filed into a folder is no longer among the ones
+ * filed in no folder, and one moved out of a folder is no longer in it.
+ */
+function stillInListing(asset: MediaAsset): boolean {
+    const filter = folderFilter.value
+    if (filter.kind === 'folder') {
+        return asset.folder_id === filter.id
+    }
+    if (filter.kind === 'unfiled') {
+        return asset.folder_id === null || asset.folder_id === undefined
+    }
+    return true
+}
+
+/**
  * A card was dropped on a folder: file it there.
  *
  * The server scopes the write by the asset's principal and refuses a
@@ -710,7 +728,14 @@ async function onFileAsset(folderId: string | null): Promise<void> {
             folder_id: folderId,
         })
         if (updated) {
-            assets.value = assets.value.map((row) => (row.id === asset.id ? updated : row))
+            if (stillInListing(updated)) {
+                assets.value = assets.value.map((row) => (row.id === asset.id ? updated : row))
+            } else {
+                // The asset left the listing — the unfiled pile, or the
+                // folder the panel is scoped to. The page is asked
+                // again, because the rows behind it have moved up.
+                await load()
+            }
         }
         adjustFolderCounts(from, folderId)
     } catch {

@@ -1240,6 +1240,67 @@ describe('App.vue arrangement', () => {
         await flushPromises()
 
         expect(patch).toHaveBeenCalledWith('/media/asset-1', { folder_id: 'folder-1' })
+        // The whole library is listed, so the card stays in it — it is
+        // only filed somewhere else.
+        expect(wrapper.find('[data-testid="media-card-asset-1"]').exists()).toBe(true)
+    })
+
+    it('takes a dropped card out of the unfiled listing, because it is filed now', async () => {
+        // The unfiled pile is a filtered view: an asset filed into a
+        // folder is no longer among the ones filed in no folder, so the
+        // row has to go — and the page behind it has to be asked for
+        // again, because the rows have moved up.
+        const rows: MediaAsset[] = [
+            { ...sample, id: 'asset-1', principal_id: 101, folder_id: null },
+            { ...sample, id: 'asset-2', principal_id: 101, folder_id: null },
+        ]
+        const get = vi.fn().mockImplementation((path: string) => {
+            if (path === '/principals/me') {
+                return Promise.resolve({ principals: defaultPrincipals })
+            }
+            if (path === '/groups') {
+                return Promise.resolve({ groups: defaultGroups })
+            }
+            if (path.startsWith('/media/folders')) {
+                return Promise.resolve({ folders: defaultFolders })
+            }
+            const unfiled = path.includes('unfiled=true')
+            const assets = unfiled ? rows.filter((row) => row.folder_id === null) : rows
+            return Promise.resolve({
+                assets,
+                page: 1,
+                perPage: 24,
+                total: assets.length,
+                lastPage: 1,
+            })
+        })
+        const helper = buildContext(get)
+        const patch = helper.api.patch as unknown as ReturnType<typeof vi.fn>
+        patch.mockImplementation((path: string) => {
+            const id = path.slice('/media/'.length)
+            const row = rows.find((candidate) => candidate.id === id)
+            const updated = { ...row, folder_id: 'folder-1' }
+            if (row !== undefined) {
+                row.folder_id = 'folder-1'
+            }
+            return Promise.resolve(updated)
+        })
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-folder-unfiled"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-card-asset-1"]').exists()).toBe(true)
+
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('dragstart')
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('dragover')
+        await wrapper.find('[data-testid="media-folder-folder-1"]').trigger('drop')
+        await flushPromises()
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="media-card-asset-1"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="media-card-asset-2"]').exists()).toBe(true)
     })
 
     it('takes a dragged card out of its folder when it is dropped on the root', async () => {
