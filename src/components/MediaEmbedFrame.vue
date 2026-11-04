@@ -3,19 +3,19 @@
  * MediaEmbedFrame — renders a script-capable media asset as live content.
  *
  * The preview an operator sees for an HTML or SVG asset. It is a real
- * `<iframe>` element rather than markup injected into the page, because the
- * detail page's preview pane renders other kinds through `v-html` — and
- * that path runs DOMPurify with an allow-list carrying no `iframe` and no
- * `script`. Anything smuggled through it would be stripped, and widening
- * the allow-list would put the whole page in scope.
+ * `<iframe>` element rather than markup injected into the page: an HTML
+ * document rendered into the page's own DOM would run in the page's
+ * origin, and no amount of escaping changes that.
  *
  * The isolation is the browser's, not this component's:
  *
  *  - The response the iframe loads carries `Content-Security-Policy:
  *    sandbox` (plus `allow-scripts` when the operator permitted scripts).
- *    A response header cannot be widened by the page embedding it, so the
- *    server's decision is the one that counts. The `sandbox` attribute
- *    here mirrors it, so the two agree.
+ *    The header is the ceiling: the browser takes the *union* of the
+ *    response's forced sandboxing flags and the frame's own `sandbox`
+ *    attribute, so the attribute can only narrow what the header allows,
+ *    never widen it. The attribute here mirrors the header, so the two
+ *    agree.
  *  - Without `allow-same-origin` the framed document gets an opaque origin:
  *    it cannot read `document.cookie`, cannot reach `localStorage`, and
  *    cannot touch the parent document.
@@ -34,7 +34,7 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps<{
     /** The embed route for the asset. */
     url: string
-    /** The asset's MIME type. */
+    /** The asset's MIME type, used for the frame's title when there is no label. */
     mime: string
     /** Whether the operator permitted the embedded scripts to run. */
     scripts: boolean
@@ -54,7 +54,7 @@ const { t } = useI18n()
 const sandbox = computed<string>(() => (props.scripts ? 'allow-scripts' : ''))
 
 const frameTitle = computed<string>(() =>
-    props.label ? t('Embedded {label}', { label: props.label }) : t('Embedded content')
+    props.label ? t('Embedded {label}', { label: props.label }) : t('Embedded {mime}', { mime: props.mime })
 )
 </script>
 
@@ -68,7 +68,7 @@ const frameTitle = computed<string>(() =>
             :sandbox="sandbox"
             :title="frameTitle"
             referrerpolicy="no-referrer"
-            class="h-96 w-full border-0 bg-white"
+            class="h-[40vh] min-h-[220px] w-full border-0 bg-white lg:h-[70vh]"
             loading="lazy"
             data-testid="media-embed-iframe"
         />

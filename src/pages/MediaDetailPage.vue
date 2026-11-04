@@ -128,14 +128,35 @@ type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'embed' | 'uns
  *
  * The server decides: a script-capable asset the operator has not permitted
  * carries no descriptor, and the descriptor says whether the embedded
- * scripts may run. The client cannot widen either — the embed route would
- * refuse to serve the bytes otherwise.
+ * scripts may run. The client's own `sandbox` attribute mirrors that
+ * decision, and the response's CSP header is the ceiling the browser
+ * enforces — the attribute can narrow it, never widen it.
+ *
+ * The `url` is checked to be a same-origin path. The descriptor is
+ * server-supplied data, and an `<iframe src>` pointing at another origin is
+ * a stronger primitive than the `<img src>` the other preview branches use
+ * — so the client does not take a URL on trust even though the server
+ * builds it.
  */
 const embedDescriptor = computed<MediaEmbedDescriptor | null>(() => {
     const derivative = selectedDerivative.value
-    if (derivative !== null) return derivative.embed ?? null
-    return asset.value?.embed ?? null
+    const descriptor = derivative !== null ? derivative.embed_descriptor : asset.value?.embed_descriptor
+    if (descriptor === null || descriptor === undefined) return null
+    if (!isSameOriginPath(descriptor.url)) return null
+    return descriptor
 })
+
+/**
+ * Whether a URL is a path on this origin.
+ *
+ * A root-relative path is same-origin by construction. A protocol-relative
+ * URL (`//host/path`) is not — it resolves against the current scheme and
+ * points elsewhere — so it is rejected alongside an absolute URL.
+ */
+function isSameOriginPath(url: string): boolean {
+    if (!url.startsWith('/')) return false
+    return !url.startsWith('//')
+}
 
 /**
  * What element the selection needs: the SELECTED derivative's format + mime_type
@@ -146,10 +167,10 @@ const previewKind = computed<PreviewKind>(() => {
     if (asset.value === null) return 'unsupported'
     const derivative = selectedDerivative.value
     if (derivative !== null) {
-        if (derivative.embed) return 'embed'
+        if (derivative.embed_descriptor) return 'embed'
         return kindForFormat(derivative.format, derivative.mime_type ?? null)
     }
-    if (asset.value.embed) return 'embed'
+    if (asset.value.embed_descriptor) return 'embed'
     return kindForMediaType(asset.value.media_type, asset.value.mime_type)
 })
 

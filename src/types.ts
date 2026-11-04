@@ -81,7 +81,7 @@ export interface MediaDerivative {
      * render, say. Absent on a core predating it, and absent whenever the
      * operator has not permitted the format.
      */
-    embed?: MediaEmbedDescriptor | null
+    embed_descriptor?: MediaEmbedDescriptor | null
     producer_plugin: string | null
     producer_operation: string | null
     created_at: string | null
@@ -92,8 +92,9 @@ export interface MediaDerivative {
  *
  * Present only when the operator has permitted the format — an install
  * that changes nothing gets no embed descriptor at all. The server decides
- * both whether it exists and whether the embedded scripts may run, so the
- * client cannot widen either.
+ * whether it exists and whether the embedded scripts may run; the client
+ * mirrors that decision in the frame's `sandbox` attribute, and the
+ * response's CSP header is the ceiling the browser enforces.
  */
 export interface MediaEmbedDescriptor {
     /** The embed route serving the asset's bytes. */
@@ -137,7 +138,7 @@ export interface MediaAsset {
      * The embed descriptor for a script-capable asset — HTML or SVG the
      * operator has permitted. Absent whenever the format is not permitted.
      */
-    embed?: MediaEmbedDescriptor | null
+    embed_descriptor?: MediaEmbedDescriptor | null
     agent_id: string | null
     task_id: string | null
     tool_call_id: string | null

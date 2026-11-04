@@ -86,7 +86,7 @@ describe('MediaDetailPage', () => {
             media_type: 'document',
             mime_type: 'text/html',
             filename: 'page.html',
-            embed: { url: '/api/v1/media/test-1/embed', mime: 'text/html', scripts: false },
+            embed_descriptor: { url: '/api/v1/media/test-1/embed', mime: 'text/html', scripts: false },
         })
         const { hostContext } = buildHostContext(get)
         const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
@@ -95,6 +95,23 @@ describe('MediaDetailPage', () => {
         expect(frame.exists()).toBe(true)
         expect(frame.attributes('src')).toBe('/api/v1/media/test-1/embed')
         expect(frame.attributes('sandbox')).toBe('')
+    })
+
+    it('ignores an embed descriptor pointing at another origin', async () => {
+        // The descriptor is server-supplied data, and an iframe is a
+        // stronger primitive than an image: the client does not take the
+        // URL on trust.
+        const get = vi.fn().mockResolvedValueOnce({
+            ...sample,
+            media_type: 'document',
+            mime_type: 'text/html',
+            filename: 'page.html',
+            embed_descriptor: { url: 'https://attacker.example/x', mime: 'text/html', scripts: true },
+        })
+        const { hostContext } = buildHostContext(get)
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="media-embed-frame"]').exists()).toBe(false)
     })
 
     it('renders an ordinary document as text, not as an embed', async () => {
