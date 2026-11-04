@@ -34,9 +34,32 @@ export interface MediaDerivative {
     asset_url: string
     /** MIME of the derivative's own `media_assets` row; absent on a core predating it, where consumers fall back to the slug. */
     mime_type?: string | null
+    /**
+     * The embed descriptor for a script-capable derivative — a Typst SVG
+     * render, say. Absent on a core predating it, and absent whenever the
+     * operator has not permitted the format.
+     */
+    embed?: MediaEmbedDescriptor | null
     producer_plugin: string | null
     producer_operation: string | null
     created_at: string | null
+}
+
+/**
+ * The embed descriptor for a script-capable asset.
+ *
+ * Present only when the operator has permitted the format — an install
+ * that changes nothing gets no embed descriptor at all. The server decides
+ * both whether it exists and whether the embedded scripts may run, so the
+ * client cannot widen either.
+ */
+export interface MediaEmbedDescriptor {
+    /** The embed route serving the asset's bytes. */
+    url: string
+    /** The asset's MIME type. */
+    mime: string
+    /** Whether the operator permitted the embedded scripts to run. */
+    scripts: boolean
 }
 
 export type StorageMode = 'local' | 'data_url' | 'external'
@@ -61,6 +84,11 @@ export interface MediaAsset {
     public_url?: string | null
     plugin_slug: string | null
     tool_name: string | null
+    /**
+     * The embed descriptor for a script-capable asset — HTML or SVG the
+     * operator has permitted. Absent whenever the format is not permitted.
+     */
+    embed?: MediaEmbedDescriptor | null
     agent_id: string | null
     task_id: string | null
     tool_call_id: string | null

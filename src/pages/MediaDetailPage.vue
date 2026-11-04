@@ -14,12 +14,13 @@ import {
     Trash2,
     X,
 } from 'lucide-vue-next'
-import type { MediaAsset, MediaDerivative } from '../types'
+import type { MediaAsset, MediaDerivative, MediaEmbedDescriptor } from '../types'
 import type { PluginHostContext } from '../shims'
 import { MdPreview } from 'md-editor-v3'
 // Deliberately kept although the editor is gone: `<MdPreview>` needs its typography.
 import 'md-editor-v3/lib/style.css'
 import VersionsStrip from '../components/VersionsStrip.vue'
+import MediaEmbedFrame from '../components/MediaEmbedFrame.vue'
 
 // `md-editor-v3` defaults to Chinese; pin the preview to en-US.
 const MARKDOWN_LOCALE = 'en-US'
@@ -102,7 +103,22 @@ const previewUnavailableLabel = computed<string>(() => {
         : asset.value.media_type
 })
 
-type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'
+type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'embed' | 'unsupported'
+
+/**
+ * The embed descriptor for the current selection, when the server supplied
+ * one.
+ *
+ * The server decides: a script-capable asset the operator has not permitted
+ * carries no descriptor, and the descriptor says whether the embedded
+ * scripts may run. The client cannot widen either — the embed route would
+ * refuse to serve the bytes otherwise.
+ */
+const embedDescriptor = computed<MediaEmbedDescriptor | null>(() => {
+    const derivative = selectedDerivative.value
+    if (derivative !== null) return derivative.embed ?? null
+    return asset.value?.embed ?? null
+})
 
 /**
  * What element the selection needs: the SELECTED derivative's format + mime_type
@@ -113,8 +129,10 @@ const previewKind = computed<PreviewKind>(() => {
     if (asset.value === null) return 'unsupported'
     const derivative = selectedDerivative.value
     if (derivative !== null) {
+        if (derivative.embed) return 'embed'
         return kindForFormat(derivative.format, derivative.mime_type ?? null)
     }
+    if (asset.value.embed) return 'embed'
     return kindForMediaType(asset.value.media_type, asset.value.mime_type)
 })
 
@@ -720,8 +738,20 @@ onBeforeUnmount(() => {
                     click.
                 -->
                 <div class="flex min-w-0 flex-col gap-3 lg:sticky lg:top-4" data-testid="media-detail-preview-column">
+                    <!--
+                        A script-capable asset the operator permitted: the live
+                        embed. The frame's own sandbox is the isolation, and the
+                        response carries a matching CSP header.
+                    -->
+                    <MediaEmbedFrame
+                        v-if="previewKind === 'embed' && embedDescriptor"
+                        :url="embedDescriptor.url"
+                        :mime="embedDescriptor.mime"
+                        :scripts="embedDescriptor.scripts"
+                        :label="previewAlt"
+                    />
                     <button
-                        v-if="previewKind === 'image'"
+                        v-else-if="previewKind === 'image'"
                         type="button"
                         class="group relative items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-3"
                         :class="previewSurfaceClass"
