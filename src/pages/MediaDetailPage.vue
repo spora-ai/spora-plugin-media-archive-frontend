@@ -14,13 +14,20 @@ import {
     Trash2,
     X,
 } from 'lucide-vue-next'
-import type { MediaAsset, MediaAssetKind, MediaDerivative, MediaFolder } from '../types'
+import type {
+    MediaAsset,
+    MediaAssetKind,
+    MediaDerivative,
+    MediaEmbedDescriptor,
+    MediaFolder,
+} from '../types'
 import type { PluginHostContext } from '../shims'
 import { MdPreview } from 'md-editor-v3'
 // Deliberately kept although the editor is gone: `<MdPreview>` needs its typography.
 import 'md-editor-v3/lib/style.css'
 import VersionsStrip from '../components/VersionsStrip.vue'
 import MediaDeleteDialog from '../components/MediaDeleteDialog.vue'
+import MediaEmbedFrame from '../components/MediaEmbedFrame.vue'
 import MediaFolderPicker from '../components/MediaFolderPicker.vue'
 import MediaToast from '../components/MediaToast.vue'
 
@@ -113,7 +120,43 @@ const previewUnavailableLabel = computed<string>(() => {
         : asset.value.media_type
 })
 
-type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported'
+type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'embed' | 'unsupported'
+
+/**
+ * The embed descriptor for the current selection, when the server supplied
+ * one.
+ *
+ * The server decides: a script-capable asset the operator has not permitted
+ * carries no descriptor, and the descriptor says whether the embedded
+ * scripts may run. The client's own `sandbox` attribute mirrors that
+ * decision, and the response's CSP header is the ceiling the browser
+ * enforces — the attribute can narrow it, never widen it.
+ *
+ * The `url` is checked to be a same-origin path. The descriptor is
+ * server-supplied data, and an `<iframe src>` pointing at another origin is
+ * a stronger primitive than the `<img src>` the other preview branches use
+ * — so the client does not take a URL on trust even though the server
+ * builds it.
+ */
+const embedDescriptor = computed<MediaEmbedDescriptor | null>(() => {
+    const derivative = selectedDerivative.value
+    const descriptor = derivative !== null ? derivative.embed_descriptor : asset.value?.embed_descriptor
+    if (descriptor === null || descriptor === undefined) return null
+    if (!isSameOriginPath(descriptor.url)) return null
+    return descriptor
+})
+
+/**
+ * Whether a URL is a path on this origin.
+ *
+ * A root-relative path is same-origin by construction. A protocol-relative
+ * URL (`//host/path`) is not — it resolves against the current scheme and
+ * points elsewhere — so it is rejected alongside an absolute URL.
+ */
+function isSameOriginPath(url: string): boolean {
+    if (!url.startsWith('/')) return false
+    return !url.startsWith('//')
+}
 
 /**
  * What element the selection needs: the SELECTED derivative's format + mime_type
@@ -124,8 +167,10 @@ const previewKind = computed<PreviewKind>(() => {
     if (asset.value === null) return 'unsupported'
     const derivative = selectedDerivative.value
     if (derivative !== null) {
+        if (derivative.embed_descriptor) return 'embed'
         return kindForFormat(derivative.format, derivative.mime_type ?? null)
     }
+    if (asset.value.embed_descriptor) return 'embed'
     return kindForMediaType(asset.value.media_type, asset.value.mime_type)
 })
 
@@ -862,8 +907,20 @@ onBeforeUnmount(() => {
                     click.
                 -->
                 <div class="flex min-w-0 flex-col gap-3 lg:sticky lg:top-4" data-testid="media-detail-preview-column">
+                    <!--
+                        A script-capable asset the operator permitted: the live
+                        embed. The frame's own sandbox is the isolation, and the
+                        response carries a matching CSP header.
+                    -->
+                    <MediaEmbedFrame
+                        v-if="previewKind === 'embed' && embedDescriptor"
+                        :url="embedDescriptor.url"
+                        :mime="embedDescriptor.mime"
+                        :scripts="embedDescriptor.scripts"
+                        :label="previewAlt"
+                    />
                     <button
-                        v-if="previewKind === 'image'"
+                        v-else-if="previewKind === 'image'"
                         type="button"
                         class="group relative items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-3"
                         :class="previewSurfaceClass"
