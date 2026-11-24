@@ -104,6 +104,11 @@ function buildContext(
          * what a core predating the folders release answers with.
          */
         foldersStatus?: number
+        /**
+         * The mock behind `api.post`. The panel posts to the
+         * chat-reference count before a bulk deletion.
+         */
+        post?: ReturnType<typeof vi.fn>
     },
 ): PluginHostContext {
     const principals = mediaHandlers?.principals ?? defaultPrincipals
@@ -142,7 +147,7 @@ function buildContext(
     })
     const api: MockedApi = {
         get: wrappedGet,
-        post: vi.fn(),
+        post: mediaHandlers?.post ?? vi.fn(),
         postForm: vi.fn(),
         patch: vi.fn(),
         delete: vi.fn(),
@@ -1379,7 +1384,7 @@ describe('App.vue selection', () => {
         lastPage: 1,
     }
 
-    function buildListContext(list: MediaListResponse): {
+    function buildListContext(list: MediaListResponse, post?: ReturnType<typeof vi.fn>): {
         helper: PluginHostContext
         patch: ReturnType<typeof vi.fn>
         remove: ReturnType<typeof vi.fn>
@@ -1396,7 +1401,7 @@ describe('App.vue selection', () => {
             }
             return Promise.resolve(list)
         })
-        const helper = buildContext(get)
+        const helper = buildContext(get, undefined, { post })
         const patch = helper.api.patch as unknown as ReturnType<typeof vi.fn>
         const remove = helper.api.delete as unknown as ReturnType<typeof vi.fn>
         patch.mockImplementation((path: string) => Promise.resolve({
@@ -1506,6 +1511,95 @@ describe('App.vue selection', () => {
         expect(wrapper.find('[data-testid="media-selection-bar"]').exists()).toBe(false)
         // The mode is off too, so a click opens the detail page again.
         expect(wrapper.find('[data-testid="media-selection-toggle"]').exists()).toBe(true)
+    })
+
+    it('warns how many of the selected assets the chats use, before deleting them', async () => {
+        // The operator is told what the deletion costs while they can
+        // still cancel: an asset a chat renders disappears from that
+        // chat when the row is deleted.
+        const post = vi.fn().mockResolvedValue({ counts: { 'asset-1': 2, 'asset-2': 0 } })
+        const { helper } = buildListContext(twoAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(post).toHaveBeenCalledWith('/media/chat-references', { ids: ['asset-1', 'asset-2'] })
+        const warning = wrapper.find('[data-testid="delete-warning"]')
+        expect(warning.exists()).toBe(true)
+        expect(warning.text()).toContain('1 selected asset is used in chats')
+    })
+
+    it('shows no chat warning when no selected asset is used in a chat', async () => {
+        const post = vi.fn().mockResolvedValue({ counts: { 'asset-1': 0, 'asset-2': 0 } })
+        const { helper } = buildListContext(twoAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+    })
+
+    it('shows no count while the chat-reference request is still in flight', async () => {
+        // A count from a previous selection must never be shown against
+        // a new one, so the warning waits for the answer.
+        let resolveCount: ((value: { counts: Record<string, number> }) => void) | null = null
+        const post = vi.fn().mockReturnValue(new Promise((resolve) => {
+            resolveCount = resolve
+        }))
+        const { helper } = buildListContext(twoAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+
+        ;(resolveCount as unknown as ((v: { counts: Record<string, number> }) => void) | null)?.({
+            counts: { 'asset-1': 1, 'asset-2': 1 },
+        })
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('2 selected assets are used in chats')
+    })
+
+    it('deletes the selected assets even when the chats use them', async () => {
+        // The warning is a warning, not a gate: the operator can still
+        // confirm the deletion.
+        const post = vi.fn().mockResolvedValue({ counts: { 'asset-1': 2, 'asset-2': 0 } })
+        const { helper, remove } = buildListContext(twoAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(true)
+
+        await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        expect(remove).toHaveBeenCalledTimes(2)
     })
 })
 

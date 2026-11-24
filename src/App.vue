@@ -30,6 +30,7 @@ import type {
     ScopedMediaFolder,
 } from './types'
 import { extractAssetId } from './lib/route-detection'
+import { countAssetsUsedInChats } from './lib/chat-references'
 import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaDeleteDialog from './components/MediaDeleteDialog.vue'
@@ -225,6 +226,21 @@ const deleteDialogOpen = ref(false)
  * while it is, so a second click cannot fire the deletion twice.
  */
 const bulkBusy = ref(false)
+
+/**
+ * How many chats reference each of the selected assets.
+ *
+ * `null` while the request is in flight: a count from a previous
+ * selection must never be shown against a new one.
+ */
+const chatReferenceCounts = ref<Record<string, number> | null>(null)
+
+/**
+ * Monotonic guard against a stale count answer. The dialog can be
+ * reopened with a different selection before the first request comes
+ * back, and only the latest answer may be shown.
+ */
+let chatReferenceRequestId = 0
 
 const selectedAssets = computed<MediaAsset[]>(() =>
     assets.value.filter((asset) => selectedIds.value.includes(asset.id)),
@@ -809,6 +825,61 @@ async function onBulkMoved(payload: {
 }
 
 /**
+ * Open the delete confirmation.
+ *
+ * The chat-reference counts are asked for as the dialog opens, so the
+ * warning is on screen before the operator can confirm.
+ */
+function openDeleteDialog(): void {
+    deleteDialogOpen.value = true
+    void fetchChatReferenceCounts()
+}
+
+/**
+ * Ask how many chats reference each of the selected assets.
+ *
+ * Best-effort: a failed lookup leaves the warning out rather than
+ * blocking the deletion — the warning is an extra, not a gate. The
+ * counts are cleared first so a stale answer from a previous selection
+ * is never shown against the current one.
+ */
+async function fetchChatReferenceCounts(): Promise<void> {
+    const ids = [...selectedIds.value]
+    chatReferenceCounts.value = null
+    const myId = ++chatReferenceRequestId
+    if (ids.length === 0) {
+        return
+    }
+    try {
+        const response = await api.value.post<{ counts?: Record<string, number> }>(
+            '/media/chat-references',
+            { ids },
+        )
+        if (myId !== chatReferenceRequestId) return
+        chatReferenceCounts.value = response?.counts ?? {}
+    } catch {
+        if (myId !== chatReferenceRequestId) return
+        chatReferenceCounts.value = {}
+    }
+}
+
+/**
+ * The warning the delete confirmation shows, or null when there is
+ * nothing to warn about.
+ *
+ * An asset a chat renders disappears from that chat when the row is
+ * deleted, so the operator is told how many of the selected assets the
+ * chats use before they confirm.
+ */
+const chatReferenceWarning = computed<string | null>(() => {
+    const used = countAssetsUsedInChats(selectedIds.value, chatReferenceCounts.value)
+    if (used === 0) {
+        return null
+    }
+    return t('{count} selected asset is used in chats and will disappear from them. | {count} selected assets are used in chats and will disappear from them.', { count: used })
+})
+
+/**
  * Delete the selected assets.
  *
  * One request per asset: the server's delete is a single-asset
@@ -1082,7 +1153,7 @@ onBeforeUnmount(() => {
                         :all-selected="selectedIds.length === assets.length && assets.length > 0"
                         :busy="bulkBusy"
                         @move="moveDialogOpen = true"
-                        @delete="deleteDialogOpen = true"
+                        @delete="openDeleteDialog"
                         @cancel="cancelSelection"
                         @select-all="toggleSelectAll"
                     />
@@ -1176,6 +1247,7 @@ onBeforeUnmount(() => {
                 v-if="deleteDialogOpen"
                 :title="t('Delete {count} asset? | Delete {count} assets?', { count: selectedIds.length })"
                 :description="t('{count} asset will be permanently deleted. This cannot be undone. | {count} assets will be permanently deleted. This cannot be undone.', { count: selectedIds.length })"
+                :warning="chatReferenceWarning ?? ''"
                 :busy="bulkBusy"
                 @confirm="confirmBulkDelete"
                 @close="deleteDialogOpen = false"

@@ -33,9 +33,16 @@ withDefaults(defineProps<{
      * operator cannot fire it twice.
      */
     busy?: boolean
+    /**
+     * What the deletion costs, in the caller's own words — "2 selected
+     * assets are used in chats and will disappear from them." Empty when
+     * there is nothing to warn about.
+     */
+    warning?: string
 }>(), {
     confirmLabel: '',
     busy: false,
+    warning: '',
 })
 
 const emit = defineEmits<{
@@ -91,6 +98,13 @@ onBeforeUnmount(() => {
                 <h2 :id="titleId" class="text-base font-semibold">{{ title }}</h2>
                 <p :id="descriptionId" class="mt-2 text-sm text-muted-foreground">
                     {{ description }}
+                </p>
+                <p
+                    v-if="warning !== ''"
+                    class="mt-3 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+                    data-testid="delete-warning"
+                >
+                    {{ warning }}
                 </p>
                 <div class="mt-4 flex justify-end gap-2">
                     <button

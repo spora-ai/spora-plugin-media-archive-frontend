@@ -179,6 +179,14 @@ page, and the bar under the toolbar counts the selection and offers
   principal's folders to use and the other assets stay where they are.
 - The delete asks first, through `MediaDeleteDialog.vue` — the same
   component the detail page's single delete uses.
+- The confirmation warns what the deletion costs: the panel asks
+  `POST /media/chat-references` for the selection as the dialog opens
+  and says how many of the selected assets the chats use — an asset a
+  chat renders disappears from that chat when the row is deleted. The
+  warning is a warning, not a gate: the operator can still confirm. A
+  count from a previous selection is never shown against a new one, and a
+  failed lookup leaves the warning out rather than blocking the
+  deletion.
 - Both are one request per asset: the server's endpoints are
   single-asset, and a batch endpoint would have to say what it does when
   one of the assets is not the caller's. The toast counts what happened:

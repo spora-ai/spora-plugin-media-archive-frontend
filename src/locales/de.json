@@ -149,6 +149,7 @@
   "{count} asset will be permanently deleted. This cannot be undone. | {count} assets will be permanently deleted. This cannot be undone.": "{count} Datei wird dauerhaft gelöscht. Das kann nicht rückgängig gemacht werden. | {count} Dateien werden dauerhaft gelöscht. Das kann nicht rückgängig gemacht werden.",
   "{count} asset | {count} assets in your archive.": "{count} Datei | {count} Dateien in Ihrem Archiv.",
   "{count} selected asset belongs to another principal and stays where it is. | {count} selected assets belong to another principal and stay where they are.": "{count} ausgewählte Datei gehört einem anderen Principal und bleibt, wo sie ist. | {count} ausgewählte Dateien gehören einem anderen Principal und bleiben, wo sie sind.",
+  "{count} selected asset is used in chats and will disappear from them. | {count} selected assets are used in chats and will disappear from them.": "{count} ausgewählte Datei wird in Chats verwendet und verschwindet daraus. | {count} ausgewählte Dateien werden in Chats verwendet und verschwinden daraus.",
   "{duration}s": "{duration} s",
   "{format} — click to preview": "{format} – zur Vorschau klicken",
   "{name} (derivative)": "{name} (Derivat)",

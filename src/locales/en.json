@@ -149,6 +149,7 @@
   "{count} asset will be permanently deleted. This cannot be undone. | {count} assets will be permanently deleted. This cannot be undone.": "{count} asset will be permanently deleted. This cannot be undone. | {count} assets will be permanently deleted. This cannot be undone.",
   "{count} asset | {count} assets in your archive.": "{count} asset | {count} assets in your archive.",
   "{count} selected asset belongs to another principal and stays where it is. | {count} selected assets belong to another principal and stay where they are.": "{count} selected asset belongs to another principal and stays where it is. | {count} selected assets belong to another principal and stay where they are.",
+  "{count} selected asset is used in chats and will disappear from them. | {count} selected assets are used in chats and will disappear from them.": "{count} selected asset is used in chats and will disappear from them. | {count} selected assets are used in chats and will disappear from them.",
   "{duration}s": "{duration}s",
   "{format} — click to preview": "{format} — click to preview",
   "{name} (derivative)": "{name} (derivative)",
