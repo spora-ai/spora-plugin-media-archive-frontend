@@ -44,6 +44,15 @@ export interface ChatReferenceLookup {
      * Ask how many chats use each of the given ids.
      */
     lookup: (ids: string[]) => Promise<void>
+    /**
+     * Drop the answer and the pending state.
+     *
+     * The answer is about the ids it was asked about, so a caller that
+     * drops the question — the confirmation is about another asset now —
+     * drops the answer with it. The request in flight is invalidated:
+     * its answer belongs to a question nobody asks any more.
+     */
+    reset: () => void
 }
 
 export function useChatReferenceLookup(api: Ref<PluginHostContext['api']>): ChatReferenceLookup {
@@ -124,5 +133,13 @@ export function useChatReferenceLookup(api: Ref<PluginHostContext['api']>): Chat
         }
     }
 
-    return { counts, pending, lookedUpIds, lookup }
+    function reset(): void {
+        clearTimer()
+        requestId++
+        counts.value = null
+        lookedUpIds.value = []
+        pending.value = false
+    }
+
+    return { counts, pending, lookedUpIds, lookup, reset }
 }

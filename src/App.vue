@@ -836,6 +836,10 @@ function openDeleteDialog(): void {
     void lookupChatReferenceCounts([...selectedIds.value])
 }
 
+function closeDeleteDialog(): void {
+    deleteDialogOpen.value = false
+}
+
 /**
  * The warning the delete confirmation shows, or null when there is
  * nothing to warn about.
@@ -874,7 +878,7 @@ async function confirmBulkDelete(): Promise<void> {
     if (chatReferencePending.value) return
     const targets = selectedAssets.value
     if (targets.length === 0) {
-        deleteDialogOpen.value = false
+        closeDeleteDialog()
         return
     }
     bulkBusy.value = true
@@ -887,7 +891,7 @@ async function confirmBulkDelete(): Promise<void> {
         targets.map((asset) => api.value.delete(`/media/${asset.id}`)),
     )
     bulkBusy.value = false
-    deleteDialogOpen.value = false
+    closeDeleteDialog()
     const deleted: MediaAsset[] = []
     let failed = 0
     for (const [index, result] of results.entries()) {
@@ -1020,6 +1024,24 @@ onMounted(async () => {
 watch(activeAssetId, (id) => {
     if (id === null) {
         void load()
+    }
+})
+
+/**
+ * The bulk confirmation belongs to the grid.
+ *
+ * The route moved to an asset, so the grid is gone — and with it the
+ * confirmation. Leaving it open would bring it back on the next visit
+ * to the grid, describing a selection that is not on screen any more.
+ *
+ * The selection itself cannot change under an open confirmation: the
+ * dialog is modal, so the page is inert, and the only other way into it
+ * is a reload, which needs a route change — and that closes the
+ * confirmation.
+ */
+watch(isOnDetailPage, (onDetail) => {
+    if (onDetail) {
+        closeDeleteDialog()
     }
 })
 
@@ -1231,7 +1253,7 @@ onBeforeUnmount(() => {
                 :checking="chatReferencePending ? t('Checking which chats use the selected assets…') : ''"
                 :busy="bulkBusy"
                 @confirm="confirmBulkDelete"
-                @close="deleteDialogOpen = false"
+                @close="closeDeleteDialog"
             />
 
             <MediaToast :message="toast" />

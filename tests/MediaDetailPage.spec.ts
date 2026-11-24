@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import MediaDetailPage from '../src/pages/MediaDetailPage.vue'
+import MediaDeleteDialog from '../src/components/MediaDeleteDialog.vue'
 import type { MediaAsset, MediaDerivative } from '../src/types'
 import type { PluginHostContext } from '../src/shims'
 
@@ -974,6 +975,72 @@ describe('MediaDetailPage', () => {
         await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
         await flushPromises()
         expect(api.delete).not.toHaveBeenCalled()
+    })
+
+    it('closes the delete confirmation when the route moves to another asset', async () => {
+        // The page is reused when the browser history moves the detail
+        // route: a confirmation that described the old asset must not
+        // survive to delete the new one.
+        const get = vi.fn().mockImplementation((path: string) =>
+            Promise.resolve(path.endsWith('asset-b') ? { ...sample, id: 'asset-b' } : sample),
+        )
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockResolvedValue({ counts: { [sample.id]: 2 } })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        const dialog = wrapper.findComponent(MediaDeleteDialog)
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('2 chats use this asset')
+
+        // The route moves to another asset.
+        await wrapper.setProps({ assetId: 'asset-b' })
+        await flushPromises()
+
+        // The confirmation is gone: it described the asset the page was
+        // on.
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+
+        // A confirmation that arrives late cannot delete the new asset on
+        // the strength of a dialog that described the old one.
+        dialog.vm.$emit('confirm')
+        await flushPromises()
+        expect(api.delete).not.toHaveBeenCalled()
+    })
+
+    it('warns about the asset the confirmation is about, not the one before it', async () => {
+        // The counts answer for the asset the lookup was asked about, so
+        // the warning has to follow the confirmation.
+        const get = vi.fn().mockImplementation((path: string) =>
+            Promise.resolve(path.endsWith('asset-b') ? { ...sample, id: 'asset-b' } : sample),
+        )
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockImplementation((_path: string, body: { ids: string[] }) =>
+            Promise.resolve({ counts: { [body.ids[0]]: body.ids[0] === 'asset-b' ? 7 : 2 } }),
+        )
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('2 chats use this asset')
+
+        await wrapper.setProps({ assetId: 'asset-b' })
+        await flushPromises()
+
+        // The confirmation is gone, so the warning about the old asset
+        // is gone with it: it may not describe an asset the
+        // confirmation is not about.
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        // The new asset's count, not the old one's.
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('7 chats use this asset')
     })
 
     it('mounts the Versions strip above the preview block and reads derivatives from the asset', async () => {

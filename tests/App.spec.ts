@@ -1863,6 +1863,42 @@ describe('App.vue selection', () => {
         // The answer was about two assets, so the warning is about two.
         expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('2 selected assets are used in chats')
     })
+
+    it('closes the bulk confirmation when the route leaves the grid', async () => {
+        // The confirmation belongs to the grid: the route moved to an
+        // asset, the grid is gone, and the confirmation must not come
+        // back on the next visit describing a selection that is not on
+        // screen any more.
+        const get = vi.fn().mockImplementation((path: string) => {
+            if (path.startsWith('/media/asset-')) {
+                return Promise.resolve({ ...sample, id: 'asset-2', principal_id: 101 })
+            }
+            return Promise.resolve(twoAssets)
+        })
+        const post = vi.fn().mockResolvedValue({ counts: { 'asset-1': 1 } })
+        const helper = buildContext(get, undefined, { post })
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(true)
+
+        await helper.router?.push('/apps/media-archive/asset/asset-2')
+        await flushPromises()
+
+        // The grid is gone, and the confirmation with it.
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(false)
+
+        // And it does not come back on the next visit to the grid.
+        await helper.router?.push('/apps/media-archive')
+        await flushPromises()
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(false)
+    })
 })
 
 describe('App.vue the unfiled slice', () => {
