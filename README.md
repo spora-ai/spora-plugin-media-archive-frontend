@@ -178,15 +178,20 @@ page, and the bar under the toolbar counts the selection and offers
   by the asset's principal, so a selection spanning principals asks which
   principal's folders to use and the other assets stay where they are.
 - The delete asks first, through `MediaDeleteDialog.vue` — the same
-  component the detail page's single delete uses.
+  component the detail page's single delete uses, and the single delete
+  carries the same chat warning as the bulk one.
 - The confirmation warns what the deletion costs: the panel asks
   `POST /media/chat-references` for the selection as the dialog opens
   and says how many of the selected assets the chats use — an asset a
   chat renders disappears from that chat when the row is deleted. The
-  warning is a warning, not a gate: the operator can still confirm. A
-  count from a previous selection is never shown against a new one, and a
-  failed lookup leaves the warning out rather than blocking the
-  deletion.
+  lookup is best-effort and batched — the endpoint takes at most 64 ids
+  per request and a selection can be larger — so a failed lookup leaves
+  the warning out rather than blocking the deletion. The confirmation
+  waits for the lookup to settle: the panel says it is checking and the
+  confirm button is disabled until the answer is in, and a lookup that
+  never comes back only holds the operator for its deadline, so a hung
+  request cannot keep the operator from deleting anything. A count from
+  a previous selection is never shown against a new one.
 - Both are one request per asset: the server's endpoints are
   single-asset, and a batch endpoint would have to say what it does when
   one of the assets is not the caller's. The toast counts what happened:

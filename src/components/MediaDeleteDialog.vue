@@ -11,10 +11,10 @@
  * `margin: 0` on every element — so without this the dialog sticks to
  * the upper left corner.
  */
-import { onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
     /**
      * The question the dialog asks.
      */
@@ -39,10 +39,19 @@ withDefaults(defineProps<{
      * there is nothing to warn about.
      */
     warning?: string
+    /**
+     * What the panel says while the chat-reference lookup is running.
+     *
+     * A non-empty label means the lookup is running: the confirm button
+     * is disabled until the lookup settles, because a deletion confirmed
+     * before its consequence is known is the case the warning exists for.
+     */
+    checking?: string
 }>(), {
     confirmLabel: '',
     busy: false,
     warning: '',
+    checking: '',
 })
 
 const emit = defineEmits<{
@@ -52,6 +61,14 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+/**
+ * Whether the chat-reference lookup is still running.
+ *
+ * The confirm button waits for it: the operator must not confirm a
+ * deletion whose consequence is not on screen yet.
+ */
+const lookupPending = computed(() => props.checking !== '')
+
 const dialogRef = ref<HTMLDialogElement | null>(null)
 
 // The dialogs are mounted one at a time, but the ids still have to be
@@ -60,6 +77,7 @@ const dialogRef = ref<HTMLDialogElement | null>(null)
 const uid = useId()
 const titleId = `delete-title-${uid}`
 const descriptionId = `delete-desc-${uid}`
+const warningId = `delete-warning-${uid}`
 
 function close(): void {
     if (dialogRef.value?.open) {
@@ -86,7 +104,7 @@ onBeforeUnmount(() => {
         ref="dialogRef"
         class="m-0 border-0 bg-transparent p-0"
         :aria-labelledby="titleId"
-        :aria-describedby="descriptionId"
+        :aria-describedby="`${descriptionId} ${warningId}`"
         data-testid="delete-confirm-dialog"
         @cancel.prevent="close"
     >
@@ -99,12 +117,32 @@ onBeforeUnmount(() => {
                 <p :id="descriptionId" class="mt-2 text-sm text-muted-foreground">
                     {{ description }}
                 </p>
-                <p
-                    v-if="warning !== ''"
-                    class="mt-3 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
-                    data-testid="delete-warning"
+                <!--
+                    The live region. It is mounted with the dialog and
+                    stays empty until the warning arrives, so a screen
+                    reader hears the consequence of the deletion without
+                    the focus moving — a region that mounts together with
+                    its text is not announced.
+                -->
+                <div
+                    :id="warningId"
+                    role="status"
+                    data-testid="delete-warning-status"
                 >
-                    {{ warning }}
+                    <p
+                        v-if="warning !== ''"
+                        class="mt-3 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+                        data-testid="delete-warning"
+                    >
+                        {{ warning }}
+                    </p>
+                </div>
+                <p
+                    v-if="lookupPending"
+                    class="mt-3 text-xs text-muted-foreground"
+                    data-testid="delete-checking"
+                >
+                    {{ checking }}
                 </p>
                 <div class="mt-4 flex justify-end gap-2">
                     <button
@@ -117,7 +155,7 @@ onBeforeUnmount(() => {
                     </button>
                     <button
                         type="button"
-                        :disabled="busy"
+                        :disabled="busy || lookupPending"
                         class="rounded bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
                         data-testid="delete-confirm"
                         @click="emit('confirm')"

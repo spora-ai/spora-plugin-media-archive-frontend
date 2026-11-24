@@ -940,6 +940,42 @@ describe('MediaDetailPage', () => {
         expect(wrapper.emitted('deleted')).toBeUndefined()
     })
 
+    it('warns how many chats use the asset before it is deleted', async () => {
+        // The single delete carries the same warning as the bulk one:
+        // an asset a chat renders disappears from that chat when the
+        // row is deleted.
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockResolvedValue({ counts: { [sample.id]: 3 } })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(api.post).toHaveBeenCalledWith('/media/chat-references', { ids: [sample.id] })
+        const warning = wrapper.find('[data-testid="delete-warning"]')
+        expect(warning.exists()).toBe(true)
+        expect(warning.text()).toContain('3 chats use this asset')
+    })
+
+    it('does not let the operator confirm while the lookup is still running', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockReturnValue(new Promise(() => {
+            // never settles
+        }))
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-checking"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="delete-confirm"]').attributes('disabled')).toBeDefined()
+        await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
+        await flushPromises()
+        expect(api.delete).not.toHaveBeenCalled()
+    })
+
     it('mounts the Versions strip above the preview block and reads derivatives from the asset', async () => {
         // The strip's options endpoint is also fired on mount; both
         // responses are pre-stubbed on the same `get` mock so the

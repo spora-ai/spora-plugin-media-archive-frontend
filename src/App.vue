@@ -32,6 +32,7 @@ import type {
 import { extractAssetId } from './lib/route-detection'
 import { countAssetsUsedInChats } from './lib/chat-references'
 import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
+import { useChatReferenceLookup } from './composables/useChatReferenceLookup'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaDeleteDialog from './components/MediaDeleteDialog.vue'
 import MediaFolderRail from './components/MediaFolderRail.vue'
@@ -230,17 +231,16 @@ const bulkBusy = ref(false)
 /**
  * How many chats reference each of the selected assets.
  *
- * `null` while the request is in flight: a count from a previous
- * selection must never be shown against a new one.
+ * The lookup runs while the confirmation is open: `counts` is `null`
+ * while it is in flight, and a count from a previous selection must
+ * never be shown against a new one.
  */
-const chatReferenceCounts = ref<Record<string, number> | null>(null)
-
-/**
- * Monotonic guard against a stale count answer. The dialog can be
- * reopened with a different selection before the first request comes
- * back, and only the latest answer may be shown.
- */
-let chatReferenceRequestId = 0
+const {
+    counts: chatReferenceCounts,
+    pending: chatReferencePending,
+    lookedUpIds: chatReferenceLookupIds,
+    lookup: lookupChatReferenceCounts,
+} = useChatReferenceLookup(api)
 
 const selectedAssets = computed<MediaAsset[]>(() =>
     assets.value.filter((asset) => selectedIds.value.includes(asset.id)),
@@ -827,40 +827,13 @@ async function onBulkMoved(payload: {
 /**
  * Open the delete confirmation.
  *
- * The chat-reference counts are asked for as the dialog opens, so the
- * warning is on screen before the operator can confirm.
+ * The chat-reference lookup starts as the dialog opens, and the
+ * confirmation waits for it: the operator cannot confirm a deletion
+ * whose consequence is not on screen yet.
  */
 function openDeleteDialog(): void {
     deleteDialogOpen.value = true
-    void fetchChatReferenceCounts()
-}
-
-/**
- * Ask how many chats reference each of the selected assets.
- *
- * Best-effort: a failed lookup leaves the warning out rather than
- * blocking the deletion — the warning is an extra, not a gate. The
- * counts are cleared first so a stale answer from a previous selection
- * is never shown against the current one.
- */
-async function fetchChatReferenceCounts(): Promise<void> {
-    const ids = [...selectedIds.value]
-    chatReferenceCounts.value = null
-    const myId = ++chatReferenceRequestId
-    if (ids.length === 0) {
-        return
-    }
-    try {
-        const response = await api.value.post<{ counts?: Record<string, number> }>(
-            '/media/chat-references',
-            { ids },
-        )
-        if (myId !== chatReferenceRequestId) return
-        chatReferenceCounts.value = response?.counts ?? {}
-    } catch {
-        if (myId !== chatReferenceRequestId) return
-        chatReferenceCounts.value = {}
-    }
+    void lookupChatReferenceCounts([...selectedIds.value])
 }
 
 /**
@@ -870,9 +843,12 @@ async function fetchChatReferenceCounts(): Promise<void> {
  * An asset a chat renders disappears from that chat when the row is
  * deleted, so the operator is told how many of the selected assets the
  * chats use before they confirm.
+ *
+ * The count is about the assets the lookup was asked about, not about
+ * the selection as it is now: the counts answer for those ids.
  */
 const chatReferenceWarning = computed<string | null>(() => {
-    const used = countAssetsUsedInChats(selectedIds.value, chatReferenceCounts.value)
+    const used = countAssetsUsedInChats(chatReferenceLookupIds.value, chatReferenceCounts.value)
     if (used === 0) {
         return null
     }
@@ -892,6 +868,10 @@ const chatReferenceWarning = computed<string | null>(() => {
  */
 async function confirmBulkDelete(): Promise<void> {
     if (bulkBusy.value) return
+    // The confirmation waits for the chat-reference lookup. A deletion
+    // confirmed before its consequence is known is the case the warning
+    // exists for.
+    if (chatReferencePending.value) return
     const targets = selectedAssets.value
     if (targets.length === 0) {
         deleteDialogOpen.value = false
@@ -1248,6 +1228,7 @@ onBeforeUnmount(() => {
                 :title="t('Delete {count} asset? | Delete {count} assets?', { count: selectedIds.length })"
                 :description="t('{count} asset will be permanently deleted. This cannot be undone. | {count} assets will be permanently deleted. This cannot be undone.', { count: selectedIds.length })"
                 :warning="chatReferenceWarning ?? ''"
+                :checking="chatReferencePending ? t('Checking which chats use the selected assets…') : ''"
                 :busy="bulkBusy"
                 @confirm="confirmBulkDelete"
                 @close="deleteDialogOpen = false"

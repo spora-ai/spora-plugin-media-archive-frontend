@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { ref } from 'vue'
 import App from '../src/App.vue'
+import MediaDeleteDialog from '../src/components/MediaDeleteDialog.vue'
 import type {
     MediaAsset,
     MediaFolder,
@@ -11,6 +12,7 @@ import type {
 } from '../src/types'
 import type { PluginHostContext } from '../src/shims'
 import { __resetShowTemporaryToggleForTesting } from '../src/composables/useShowTemporaryToggle'
+import { CHAT_REFERENCE_TIMEOUT_MS } from '../src/composables/useChatReferenceLookup'
 
 type GetFn = <T = unknown>(path: string) => Promise<T>
 type MockedApi = {
@@ -1384,6 +1386,26 @@ describe('App.vue selection', () => {
         lastPage: 1,
     }
 
+    /**
+     * A selection that is larger than one chat-reference request may
+     * carry.
+     *
+     * The grid paginates, so "select all" can name more assets than the
+     * endpoint accepts in a single request: 70 rows here, against a limit
+     * of 64.
+     */
+    const manyAssets: MediaListResponse = {
+        assets: Array.from({ length: 70 }, (_, index) => ({
+            ...sample,
+            id: `asset-${index + 1}`,
+            principal_id: 101,
+        })),
+        page: 1,
+        perPage: 24,
+        total: 70,
+        lastPage: 3,
+    }
+
     function buildListContext(list: MediaListResponse, post?: ReturnType<typeof vi.fn>): {
         helper: PluginHostContext
         patch: ReturnType<typeof vi.fn>
@@ -1600,6 +1622,246 @@ describe('App.vue selection', () => {
         await flushPromises()
 
         expect(remove).toHaveBeenCalledTimes(2)
+    })
+
+    it('asks for the chat-reference counts in batches, so a large selection still warns', async () => {
+        // The endpoint answers a 422 for more than 64 ids, and the
+        // selection can be larger than that — the warning must not
+        // disappear exactly when it matters most.
+        const post = vi.fn((_path: string, body: { ids: string[] }) => {
+            const counts: Record<string, number> = {}
+            for (const id of body.ids) {
+                counts[id] = id === 'asset-1' ? 3 : id === 'asset-65' ? 1 : 0
+            }
+            return Promise.resolve({ counts })
+        })
+        const { helper } = buildListContext(manyAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-select-all"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        // 70 ids do not fit into one request, so they are asked for in
+        // two.
+        expect(post).toHaveBeenCalledTimes(2)
+        const batches = post.mock.calls.map((call) => call[1].ids)
+        for (const batch of batches) {
+            expect(batch.length).toBeLessThanOrEqual(64)
+        }
+        expect(batches.flat()).toHaveLength(70)
+
+        // The answers of both batches are merged, so the count is about
+        // the selection as a whole.
+        const warning = wrapper.find('[data-testid="delete-warning"]')
+        expect(warning.exists()).toBe(true)
+        expect(warning.text()).toContain('2 selected assets are used in chats')
+    })
+
+    it('drops the late answer of a previous selection when the counts come in batches', async () => {
+        // The dialog can be reopened with a different selection before
+        // the batches of the first one come back — the late answer must
+        // not land on the new selection.
+        const pending: Array<(value: { counts: Record<string, number> }) => void> = []
+        const post = vi.fn((_path: string, _body: { ids: string[] }) =>
+            new Promise<{ counts: Record<string, number> }>((resolve) => {
+                pending.push(resolve)
+            }),
+        )
+        const { helper } = buildListContext(manyAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-select-all"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        // The 70 selected assets need two batches.
+        expect(post).toHaveBeenCalledTimes(2)
+
+        // A different selection, asked for while the first answer is
+        // still in flight.
+        await wrapper.find('[data-testid="delete-cancel"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-cancel"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(post).toHaveBeenCalledTimes(3)
+
+        pending[2]?.({ counts: { 'asset-1': 1 } })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('1 selected asset is used in chats')
+
+        // The two late batches of the selection before it. They say the
+        // asset is not used in any chat, and they must not be believed.
+        pending[0]?.({ counts: { 'asset-1': 0 } })
+        pending[1]?.({ counts: {} })
+        await flushPromises()
+
+        const warning = wrapper.find('[data-testid="delete-warning"]')
+        expect(warning.exists()).toBe(true)
+        expect(warning.text()).toContain('1 selected asset is used in chats')
+    })
+
+    it('keeps the warning in a live region that is there before the answer arrives', async () => {
+        // The warning arrives after the dialog is open, so a screen
+        // reader has to hear about it without the focus moving —
+        // https://www.w3.org/WAI/WCAG21/Techniques/aria/ARIA22.
+        let resolveCount: ((value: { counts: Record<string, number> }) => void) | null = null
+        const post = vi.fn().mockReturnValue(new Promise((resolve) => {
+            resolveCount = resolve
+        }))
+        const { helper } = buildListContext(twoAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        // The region is mounted with the dialog and is empty until the
+        // answer arrives — a region that mounts together with its text
+        // is not announced.
+        const status = wrapper.find('[data-testid="delete-warning-status"]')
+        expect(status.exists()).toBe(true)
+        expect(status.text()).toBe('')
+
+        ;(resolveCount as unknown as ((v: { counts: Record<string, number> }) => void) | null)?.({
+            counts: { 'asset-1': 2 },
+        })
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-warning-status"]').text()).toContain('1 selected asset is used in chats')
+
+        // The warning is part of the dialog's description.
+        const statusId = status.attributes('id') ?? ''
+        expect(statusId).not.toBe('')
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').attributes('aria-describedby')).toContain(statusId)
+    })
+
+    it('does not let the operator confirm while the lookup is still running', async () => {
+        // "Pending" must not look like "nothing is used in chats": a
+        // confirmation inside the request window would delete
+        // chat-referenced assets without the warning ever being on
+        // screen.
+        const post = vi.fn().mockReturnValue(new Promise(() => {
+            // never settles
+        }))
+        const { helper, remove } = buildListContext(twoAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        // The panel says it is checking, and says nothing about the
+        // chats.
+        const checking = wrapper.find('[data-testid="delete-checking"]')
+        expect(checking.exists()).toBe(true)
+        expect(checking.text()).toContain('Checking which chats use the selected assets')
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+
+        // The confirmation waits for the answer.
+        expect(wrapper.find('[data-testid="delete-confirm"]').attributes('disabled')).toBeDefined()
+        await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
+        await flushPromises()
+        expect(remove).not.toHaveBeenCalled()
+
+        // The confirmation is refused even when the event arrives
+        // without the button — the panel is the last line of defence.
+        wrapper.findComponent(MediaDeleteDialog).vm.$emit('confirm')
+        await flushPromises()
+        expect(remove).not.toHaveBeenCalled()
+    })
+
+    describe('the chat-reference deadline', () => {
+        beforeEach(() => {
+            vi.useFakeTimers()
+        })
+
+        afterEach(() => {
+            vi.useRealTimers()
+        })
+
+        it('lets the deletion through when the lookup times out', async () => {
+            // A hung lookup must not leave the operator unable to delete
+            // anything: the deadline ends the wait, and the deletion goes
+            // on without a warning.
+            const post = vi.fn().mockReturnValue(new Promise(() => {
+                // never settles
+            }))
+            const { helper, remove } = buildListContext(twoAssets, post)
+            const wrapper = mount(App, { props: { hostContext: helper } })
+            await flushPromises()
+            await flushPromises()
+
+            await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+            await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+            await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+            await flushPromises()
+
+            expect(wrapper.find('[data-testid="delete-checking"]').exists()).toBe(true)
+
+            await vi.advanceTimersByTimeAsync(CHAT_REFERENCE_TIMEOUT_MS)
+            await flushPromises()
+
+            // The deadline passed: no warning, and the confirmation is
+            // available again.
+            expect(wrapper.find('[data-testid="delete-checking"]').exists()).toBe(false)
+            expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+            expect(wrapper.find('[data-testid="delete-confirm"]').attributes('disabled')).toBeUndefined()
+
+            await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
+            await flushPromises()
+            await flushPromises()
+
+            expect(remove).toHaveBeenCalledWith('/media/asset-1')
+            wrapper.unmount()
+        })
+    })
+
+    it('counts the assets the answer was fetched for, not the selection as it is now', async () => {
+        // The counts answer for the ids the lookup was asked about, so
+        // the warning has to be about those ids — otherwise it counts
+        // assets the answer says nothing about.
+        let resolveCount: ((value: { counts: Record<string, number> }) => void) | null = null
+        const post = vi.fn().mockReturnValue(new Promise((resolve) => {
+            resolveCount = resolve
+        }))
+        const { helper } = buildListContext(twoAssets, post)
+        const wrapper = mount(App, { props: { hostContext: helper } })
+        await flushPromises()
+        await flushPromises()
+
+        await wrapper.find('[data-testid="media-selection-toggle"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-1"]').trigger('click')
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        await wrapper.find('[data-testid="media-selection-delete"]').trigger('click')
+        await flushPromises()
+
+        // The selection changes while the answer is on its way.
+        await wrapper.find('[data-testid="media-card-asset-2"]').trigger('click')
+        expect(wrapper.find('[data-testid="media-selection-count"]').text()).toContain('1 asset selected')
+
+        ;(resolveCount as unknown as ((v: { counts: Record<string, number> }) => void) | null)?.({
+            counts: { 'asset-1': 1, 'asset-2': 1 },
+        })
+        await flushPromises()
+
+        // The answer was about two assets, so the warning is about two.
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('2 selected assets are used in chats')
     })
 })
 
