@@ -123,20 +123,24 @@ onBeforeUnmount(() => {
                     reader hears the consequence of the deletion without
                     the focus moving — a region that mounts together with
                     its text is not announced.
+
+                    An `<output>` carries the `status` role implicitly, and
+                    it is the element a screen reader announces across
+                    devices — `role="status"` on a `<div>` is not.
                 -->
-                <div
+                <output
                     :id="warningId"
-                    role="status"
+                    class="block"
                     data-testid="delete-warning-status"
                 >
-                    <p
+                    <span
                         v-if="warning !== ''"
-                        class="mt-3 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+                        class="mt-3 block rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
                         data-testid="delete-warning"
                     >
                         {{ warning }}
-                    </p>
-                </div>
+                    </span>
+                </output>
                 <p
                     v-if="lookupPending"
                     class="mt-3 text-xs text-muted-foreground"
