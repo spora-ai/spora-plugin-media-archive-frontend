@@ -30,7 +30,9 @@ import type {
     ScopedMediaFolder,
 } from './types'
 import { extractAssetId } from './lib/route-detection'
+import { countAssetsUsedInChats } from './lib/chat-references'
 import { useShowTemporaryToggle } from './composables/useShowTemporaryToggle'
+import { useChatReferenceLookup } from './composables/useChatReferenceLookup'
 import MediaGrid from './components/MediaGrid.vue'
 import MediaDeleteDialog from './components/MediaDeleteDialog.vue'
 import MediaFolderRail from './components/MediaFolderRail.vue'
@@ -225,6 +227,20 @@ const deleteDialogOpen = ref(false)
  * while it is, so a second click cannot fire the deletion twice.
  */
 const bulkBusy = ref(false)
+
+/**
+ * How many chats reference each of the selected assets.
+ *
+ * The lookup runs while the confirmation is open: `counts` is `null`
+ * while it is in flight, and a count from a previous selection must
+ * never be shown against a new one.
+ */
+const {
+    counts: chatReferenceCounts,
+    pending: chatReferencePending,
+    lookedUpIds: chatReferenceLookupIds,
+    lookup: lookupChatReferenceCounts,
+} = useChatReferenceLookup(api)
 
 const selectedAssets = computed<MediaAsset[]>(() =>
     assets.value.filter((asset) => selectedIds.value.includes(asset.id)),
@@ -809,6 +825,41 @@ async function onBulkMoved(payload: {
 }
 
 /**
+ * Open the delete confirmation.
+ *
+ * The chat-reference lookup starts as the dialog opens, and the
+ * confirmation waits for it: the operator cannot confirm a deletion
+ * whose consequence is not on screen yet.
+ */
+function openDeleteDialog(): void {
+    deleteDialogOpen.value = true
+    void lookupChatReferenceCounts([...selectedIds.value])
+}
+
+function closeDeleteDialog(): void {
+    deleteDialogOpen.value = false
+}
+
+/**
+ * The warning the delete confirmation shows, or null when there is
+ * nothing to warn about.
+ *
+ * An asset a chat renders disappears from that chat when the row is
+ * deleted, so the operator is told how many of the selected assets the
+ * chats use before they confirm.
+ *
+ * The count is about the assets the lookup was asked about, not about
+ * the selection as it is now: the counts answer for those ids.
+ */
+const chatReferenceWarning = computed<string | null>(() => {
+    const used = countAssetsUsedInChats(chatReferenceLookupIds.value, chatReferenceCounts.value)
+    if (used === 0) {
+        return null
+    }
+    return t('{count} selected asset is used in chats and will disappear from them. | {count} selected assets are used in chats and will disappear from them.', { count: used })
+})
+
+/**
  * Delete the selected assets.
  *
  * One request per asset: the server's delete is a single-asset
@@ -821,9 +872,13 @@ async function onBulkMoved(payload: {
  */
 async function confirmBulkDelete(): Promise<void> {
     if (bulkBusy.value) return
+    // The confirmation waits for the chat-reference lookup. A deletion
+    // confirmed before its consequence is known is the case the warning
+    // exists for.
+    if (chatReferencePending.value) return
     const targets = selectedAssets.value
     if (targets.length === 0) {
-        deleteDialogOpen.value = false
+        closeDeleteDialog()
         return
     }
     bulkBusy.value = true
@@ -836,7 +891,7 @@ async function confirmBulkDelete(): Promise<void> {
         targets.map((asset) => api.value.delete(`/media/${asset.id}`)),
     )
     bulkBusy.value = false
-    deleteDialogOpen.value = false
+    closeDeleteDialog()
     const deleted: MediaAsset[] = []
     let failed = 0
     for (const [index, result] of results.entries()) {
@@ -972,6 +1027,24 @@ watch(activeAssetId, (id) => {
     }
 })
 
+/**
+ * The bulk confirmation belongs to the grid.
+ *
+ * The route moved to an asset, so the grid is gone — and with it the
+ * confirmation. Leaving it open would bring it back on the next visit
+ * to the grid, describing a selection that is not on screen any more.
+ *
+ * The selection itself cannot change under an open confirmation: the
+ * dialog is modal, so the page is inert, and the only other way into it
+ * is a reload, which needs a route change — and that closes the
+ * confirmation.
+ */
+watch(isOnDetailPage, (onDetail) => {
+    if (onDetail) {
+        closeDeleteDialog()
+    }
+})
+
 // Reload the grid when the operator flips the "Include temporary
 // files" toggle — the server's filter changes meaning and the
 // client can't just show/hide rows that aren't in `assets`. Reset
@@ -1082,7 +1155,7 @@ onBeforeUnmount(() => {
                         :all-selected="selectedIds.length === assets.length && assets.length > 0"
                         :busy="bulkBusy"
                         @move="moveDialogOpen = true"
-                        @delete="deleteDialogOpen = true"
+                        @delete="openDeleteDialog"
                         @cancel="cancelSelection"
                         @select-all="toggleSelectAll"
                     />
@@ -1176,9 +1249,11 @@ onBeforeUnmount(() => {
                 v-if="deleteDialogOpen"
                 :title="t('Delete {count} asset? | Delete {count} assets?', { count: selectedIds.length })"
                 :description="t('{count} asset will be permanently deleted. This cannot be undone. | {count} assets will be permanently deleted. This cannot be undone.', { count: selectedIds.length })"
+                :warning="chatReferenceWarning ?? ''"
+                :checking="chatReferencePending ? t('Checking which chats use the selected assets…') : ''"
                 :busy="bulkBusy"
                 @confirm="confirmBulkDelete"
-                @close="deleteDialogOpen = false"
+                @close="closeDeleteDialog"
             />
 
             <MediaToast :message="toast" />

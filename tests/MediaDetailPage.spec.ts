@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import MediaDetailPage from '../src/pages/MediaDetailPage.vue'
+import MediaDeleteDialog from '../src/components/MediaDeleteDialog.vue'
 import type { MediaAsset, MediaDerivative } from '../src/types'
 import type { PluginHostContext } from '../src/shims'
 
@@ -938,6 +939,108 @@ describe('MediaDetailPage', () => {
         await flushPromises()
         expect(api.delete).not.toHaveBeenCalled()
         expect(wrapper.emitted('deleted')).toBeUndefined()
+    })
+
+    it('warns how many chats use the asset before it is deleted', async () => {
+        // The single delete carries the same warning as the bulk one:
+        // an asset a chat renders disappears from that chat when the
+        // row is deleted.
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockResolvedValue({ counts: { [sample.id]: 3 } })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(api.post).toHaveBeenCalledWith('/media/chat-references', { ids: [sample.id] })
+        const warning = wrapper.find('[data-testid="delete-warning"]')
+        expect(warning.exists()).toBe(true)
+        expect(warning.text()).toContain('3 chats use this asset')
+    })
+
+    it('does not let the operator confirm while the lookup is still running', async () => {
+        const get = vi.fn().mockResolvedValueOnce(sample)
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockReturnValue(new Promise(() => {
+            // never settles
+        }))
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-checking"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="delete-confirm"]').attributes('disabled')).toBeDefined()
+        await wrapper.find('[data-testid="delete-confirm"]').trigger('click')
+        await flushPromises()
+        expect(api.delete).not.toHaveBeenCalled()
+    })
+
+    it('closes the delete confirmation when the route moves to another asset', async () => {
+        // The page is reused when the browser history moves the detail
+        // route: a confirmation that described the old asset must not
+        // survive to delete the new one.
+        const get = vi.fn().mockImplementation((path: string) =>
+            Promise.resolve(path.endsWith('asset-b') ? { ...sample, id: 'asset-b' } : sample),
+        )
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockResolvedValue({ counts: { [sample.id]: 2 } })
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        const dialog = wrapper.findComponent(MediaDeleteDialog)
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('2 chats use this asset')
+
+        // The route moves to another asset.
+        await wrapper.setProps({ assetId: 'asset-b' })
+        await flushPromises()
+
+        // The confirmation is gone: it described the asset the page was
+        // on.
+        expect(wrapper.find('[data-testid="delete-confirm-dialog"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+
+        // A confirmation that arrives late cannot delete the new asset on
+        // the strength of a dialog that described the old one.
+        dialog.vm.$emit('confirm')
+        await flushPromises()
+        expect(api.delete).not.toHaveBeenCalled()
+    })
+
+    it('warns about the asset the confirmation is about, not the one before it', async () => {
+        // The counts answer for the asset the lookup was asked about, so
+        // the warning has to follow the confirmation.
+        const get = vi.fn().mockImplementation((path: string) =>
+            Promise.resolve(path.endsWith('asset-b') ? { ...sample, id: 'asset-b' } : sample),
+        )
+        const { hostContext, api } = buildHostContext(get)
+        api.post.mockImplementation((_path: string, body: { ids: string[] }) =>
+            Promise.resolve({ counts: { [body.ids[0]]: body.ids[0] === 'asset-b' ? 7 : 2 } }),
+        )
+        const wrapper = mount(MediaDetailPage, { props: { assetId: sample.id, hostContext } })
+        await flushPromises()
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('2 chats use this asset')
+
+        await wrapper.setProps({ assetId: 'asset-b' })
+        await flushPromises()
+
+        // The confirmation is gone, so the warning about the old asset
+        // is gone with it: it may not describe an asset the
+        // confirmation is not about.
+        expect(wrapper.find('[data-testid="delete-warning"]').exists()).toBe(false)
+
+        await wrapper.find('[data-testid="media-page-delete"]').trigger('click')
+        await flushPromises()
+
+        // The new asset's count, not the old one's.
+        expect(wrapper.find('[data-testid="delete-warning"]').text()).toContain('7 chats use this asset')
     })
 
     it('mounts the Versions strip above the preview block and reads derivatives from the asset', async () => {

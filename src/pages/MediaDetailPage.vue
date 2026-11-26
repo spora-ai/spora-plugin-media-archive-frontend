@@ -30,6 +30,8 @@ import MediaDeleteDialog from '../components/MediaDeleteDialog.vue'
 import MediaEmbedFrame from '../components/MediaEmbedFrame.vue'
 import MediaFolderPicker from '../components/MediaFolderPicker.vue'
 import MediaToast from '../components/MediaToast.vue'
+import { countChatsUsingAsset } from '../lib/chat-references'
+import { useChatReferenceLookup } from '../composables/useChatReferenceLookup'
 
 // `md-editor-v3` defaults to Chinese; pin the preview to en-US.
 const MARKDOWN_LOCALE = 'en-US'
@@ -691,25 +693,93 @@ async function saveField(field: 'filename' | 'prompt' | 'tags'): Promise<void> {
  */
 const deleteDialogOpen = ref(false)
 
+/**
+ * The asset the open confirmation is about.
+ *
+ * The confirmation is bound to one asset: its copy, its warning and the
+ * delete it fires have to name the same row. The page is reused when
+ * the route moves to another asset, so the id is captured when the
+ * confirmation opens.
+ */
+const deleteTargetId = ref<string | null>(null)
+
+/**
+ * How many chats use this asset.
+ *
+ * The lookup runs while the confirmation is open, and the confirmation
+ * waits for it: the operator cannot confirm a deletion whose consequence
+ * is not on screen yet.
+ */
+const {
+    counts: chatReferenceCounts,
+    pending: chatReferencePending,
+    lookup: lookupChatReferenceCounts,
+    reset: resetChatReferenceLookup,
+} = useChatReferenceLookup(api)
+
+/**
+ * The warning the delete confirmation shows, or null when there is
+ * nothing to warn about.
+ *
+ * An asset a chat renders disappears from that chat when the row is
+ * deleted, so the operator is told how many chats use it before they
+ * confirm. The count is about the asset the confirmation is about.
+ */
+const chatReferenceWarning = computed<string | null>(() => {
+    const id = deleteTargetId.value
+    if (id === null) {
+        return null
+    }
+    const chats = countChatsUsingAsset(chatReferenceCounts.value, id)
+    if (chats === 0) {
+        return null
+    }
+    return t('{count} chat uses this asset and it will disappear from them. | {count} chats use this asset and it will disappear from them.', { count: chats })
+})
+
 function openDeleteDialog(): void {
+    const id = asset.value?.id
+    if (id === undefined) {
+        return
+    }
+    deleteTargetId.value = id
     deleteDialogOpen.value = true
+    void lookupChatReferenceCounts([id])
 }
 
+/**
+ * Close the confirmation.
+ *
+ * The answer about the asset it was for goes with it: the counts are
+ * about that asset, and a confirmation about another one must not show
+ * them.
+ */
 function closeDeleteDialog(): void {
     deleteDialogOpen.value = false
+    deleteTargetId.value = null
+    resetChatReferenceLookup()
 }
 
 async function confirmDelete(): Promise<void> {
+    // The confirmation waits for the chat-reference lookup. A deletion
+    // confirmed before its consequence is known is the case the warning
+    // exists for.
+    if (chatReferencePending.value) return
+    // The confirmation is about one asset, and it may not delete another
+    // one: the page is reused when the route moves on, and the asset on
+    // screen is not necessarily the one the confirmation was opened for.
+    const target = deleteTargetId.value
+    if (target === null) return
     closeDeleteDialog()
-    if (asset.value === null) return
+    if (asset.value?.id !== target) return
     const result = await mutate({
         field: 'delete',
         verb: 'delete',
-        path: `/media/${asset.value.id}`,
+        path: `/media/${target}`,
         successToast: t('Asset deleted'),
     })
     if (result !== null) {
-        emit('deleted', asset.value.id)
+        emit('deleted', target)
     }
 }
 
@@ -809,7 +879,18 @@ onMounted(() => {
 })
 
 watch(() => props.assetId, () => {
+    // The confirmation is about one asset: a route change must not leave
+    // a dialog describing the asset the page was on.
+    closeDeleteDialog()
     void loadAsset()
+})
+
+watch(() => asset.value?.id, (id) => {
+    // The confirmation may not outlive the asset it describes — the
+    // asset on screen is the one that would be deleted.
+    if (id !== deleteTargetId.value) {
+        closeDeleteDialog()
+    }
 })
 
 onBeforeUnmount(() => {
@@ -1423,6 +1504,8 @@ onBeforeUnmount(() => {
             v-if="asset && deleteDialogOpen"
             :title="t('Delete asset?')"
             :description="t('{name} will be permanently deleted. This cannot be undone.', { name: asset.filename ?? t('This asset') })"
+            :warning="chatReferenceWarning ?? ''"
+            :checking="chatReferencePending ? t('Checking which chats use this asset…') : ''"
             @confirm="confirmDelete"
             @close="closeDeleteDialog"
         />
